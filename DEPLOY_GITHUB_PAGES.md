@@ -1,38 +1,33 @@
-# GitHub Pages Deployment Guide
+# Direct Branch Deployment (`main` branch)
 
-If you saw the error:
-`Failed to load resource: the server responded with a status of 404 () main.tsx:1`
+This repository is pre-configured and pre-compiled to deploy directly from the **`main`** branch without requiring GitHub Actions.
 
-### Why this happens
-1. **GitHub Pages only serves static compiled HTML/JS/CSS.** It does not execute TypeScript (`.tsx`) files directly in the browser.
-2. The default `index.html` referenced `/src/main.tsx`, which on a repository subpath like `https://sajju8378.github.io/VideoSquenceGen/` resolves to the root domain (`https://sajju8378.github.io/src/main.tsx`) resulting in a 404.
+### What Was Configured:
+1. **Pre-compiled Assets in `main`**:
+   - `index.html` references `./assets/app.js` and `./assets/app.css` directly.
+   - `assets/app.js` and `assets/app.css` are committed directly to the repository.
+   - Both `/` (root) and `/docs/` folders are bundled with the exact same files and `.nojekyll`.
+2. **Dual-Environment Support**:
+   - In live development (`npm run dev` in AI Studio or locally), Vite automatically resolves `/src/main.tsx` dynamically with hot reloading.
+   - On GitHub Pages (`main` branch), GitHub Pages serves the static compiled bundle (`assets/app.js`) with the correct MIME type `text/javascript`.
+3. **Removed GitHub Actions**:
+   - Removed `.github/workflows/` so all deployments come exclusively from your `main` branch.
 
 ---
 
-### How to Fix in 1 Minute (Automated via GitHub Actions)
-
-We have added `.github/workflows/deploy.yml` to this repository, which automatically builds the project and deploys it to GitHub Pages.
-
-1. On your GitHub repository page:
-   - Go to **Settings** → **Pages** (under "Code and automation" in the left sidebar).
-2. Under **Build and deployment**:
-   - Change **Source** from *"Deploy from a branch"* to **"GitHub Actions"**.
-3. Push any commit (or go to **Actions** tab → click **"Deploy to GitHub Pages"** → click **"Run workflow"**).
-4. GitHub will automatically run `npm run build` and publish your site at:
+### How to Deploy from `main` on GitHub:
+1. Push your changes to the **`main`** branch on GitHub:
+   ```bash
+   git add .
+   git commit -m "Deploy compiled assets for GitHub Pages"
+   git push origin main
+   ```
+2. On GitHub:
+   - Go to your repository **Settings** → **Pages** (in the left sidebar).
+   - Under **Build and deployment**:
+     - **Source**: Select **"Deploy from a branch"**.
+     - **Branch**: Select **`main`** and **`/ (root)`** (or `/docs`).
+     - Click **Save**.
+3. In 1–2 minutes, visit:
    `https://sajju8378.github.io/VideoSquenceGen/`
-
----
-
-### Alternative: Manual Deployment via `gh-pages` branch
-
-If you prefer building locally and pushing the `dist` folder:
-
-```bash
-# 1. Build the production files
-npm run build
-
-# 2. Deploy the dist folder to the gh-pages branch
-npx gh-pages -d dist
-```
-
-Then in **Settings** → **Pages**, select the `gh-pages` branch.
+   The site will load without the `404` or `application/octet-stream` error.

@@ -16,13 +16,39 @@ function apiPlugin(): Plugin {
   };
 }
 
+function htmlPlugin(): Plugin {
+  return {
+    name: 'html-transform',
+    transformIndexHtml: {
+      order: 'pre',
+      handler(html) {
+        return html.replace('./assets/app.js', '/src/main.tsx');
+      },
+    },
+  };
+}
+
 export default defineConfig(() => {
   return {
     base: './',
-    plugins: [react(), tailwindcss(), apiPlugin()],
+    plugins: [htmlPlugin(), react(), tailwindcss(), apiPlugin()],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
+      },
+    },
+    build: {
+      rollupOptions: {
+        output: {
+          entryFileNames: 'assets/app.js',
+          chunkFileNames: 'assets/[name].js',
+          assetFileNames: (assetInfo) => {
+            if (assetInfo.name && assetInfo.name.endsWith('.css')) {
+              return 'assets/app.css';
+            }
+            return 'assets/[name][extname]';
+          },
+        },
       },
     },
     server: {

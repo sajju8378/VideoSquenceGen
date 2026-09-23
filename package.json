@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
-    "build": "vite build",
+    "build": "vite build && mkdir -p assets docs/assets && cp -r dist/assets/* assets/ && cp -r dist/assets/* docs/assets/ && cp dist/index.html docs/index.html && touch .nojekyll docs/.nojekyll",
     "start": "node server.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
