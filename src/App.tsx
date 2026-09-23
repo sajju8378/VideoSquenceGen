@@ -6,6 +6,7 @@ import { CinemaViewer } from './components/CinemaViewer.tsx';
 import { LogsModal } from './components/LogsModal.tsx';
 import { ZeroGPUExportModal } from './components/ZeroGPUExportModal.tsx';
 import type { Job, Scene } from './types.ts';
+import { apiClient } from './services/apiClient.ts';
 import {
   Film,
   Layers,
@@ -33,9 +34,8 @@ export default function App() {
   const fetchActiveJob = async () => {
     if (!activeJobId) return;
     try {
-      const res = await fetch(`/api/jobs/${activeJobId}`);
-      if (res.ok) {
-        const data = await res.json();
+      const data = await apiClient.getJob(activeJobId);
+      if (data) {
         setCurrentJob(data);
       }
     } catch (err) {
@@ -45,15 +45,11 @@ export default function App() {
 
   const fetchRecentJobs = async () => {
     try {
-      const res = await fetch('/api/jobs');
-      if (res.ok) {
-        const data = await res.json();
-        setRecentJobs(Array.isArray(data) ? data : []);
-        // If no active job is selected, select the most recent one if available
-        if (!activeJobId && data.length > 0) {
-          setActiveJobId(data[0].id);
-          setCurrentJob(data[0]);
-        }
+      const data = await apiClient.getJobs();
+      setRecentJobs(Array.isArray(data) ? data : []);
+      if (!activeJobId && data.length > 0) {
+        setActiveJobId(data[0].id);
+        setCurrentJob(data[0]);
       }
     } catch (err) {
       console.error('Failed to fetch recent jobs:', err);

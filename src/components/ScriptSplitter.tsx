@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { SCRIPT_PRESETS, ScriptPreset } from '../presets.ts';
 import type { SplitSceneResult } from '../types.ts';
+import { apiClient } from '../services/apiClient.ts';
 
 interface ScriptSplitterProps {
   onJobCreated: (jobId: string) => void;
@@ -52,21 +53,11 @@ export const ScriptSplitter: React.FC<ScriptSplitterProps> = ({ onJobCreated }) 
     setSplitError(null);
 
     try {
-      const res = await fetch('/api/split-script', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          script: scriptText,
-          targetDuration,
-          genreStyle,
-          aspectRatio,
-        }),
+      const data = await apiClient.splitScript(scriptText, {
+        targetDuration,
+        genreStyle,
+        aspectRatio,
       });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to split script');
-      }
 
       if (data.title && !projectTitle) {
         setProjectTitle(data.title);
@@ -114,25 +105,16 @@ export const ScriptSplitter: React.FC<ScriptSplitterProps> = ({ onJobCreated }) 
     setSplitError(null);
 
     try {
-      const res = await fetch('/api/jobs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: projectTitle || 'Untitled Project',
-          script: scriptText,
-          targetResolution: resolution,
-          aspectRatio,
-          scenes,
-          simulation: {
-            acceleratedSpeed: true, // Default accelerated ffmpeg generation for snappy testing
-          },
-        }),
+      const job = await apiClient.createJob({
+        title: projectTitle || 'Untitled Project',
+        script: scriptText,
+        targetResolution: resolution,
+        aspectRatio,
+        scenes,
+        simulation: {
+          acceleratedSpeed: true, // Default accelerated ffmpeg generation for snappy testing
+        },
       });
-
-      const job = await res.json();
-      if (!res.ok) {
-        throw new Error(job.error || 'Failed to initialize job');
-      }
 
       onJobCreated(job.id);
     } catch (err: any) {

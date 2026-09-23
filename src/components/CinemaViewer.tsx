@@ -16,6 +16,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import type { Job, Scene } from '../types.ts';
+import { apiClient } from '../services/apiClient.ts';
 
 interface CinemaViewerProps {
   job: Job;
@@ -45,13 +46,31 @@ export const CinemaViewer: React.FC<CinemaViewerProps> = ({
   const scenes = job.scenes || [];
   const completedScenes = scenes.filter(s => s.status === 'done' && s.output_path);
 
+  const resolveClipUrl = (filePath: string | null) => {
+    if (!filePath) return null;
+    if (filePath.startsWith('blob:') || filePath.startsWith('data:') || filePath.startsWith('http')) {
+      return filePath;
+    }
+    const filename = filePath.split('/').pop() || '';
+    return `/api/media/clips/${filename}`;
+  };
+
+  const resolveFinalUrl = (filePath: string | null) => {
+    if (!filePath) return null;
+    if (filePath.startsWith('blob:') || filePath.startsWith('data:') || filePath.startsWith('http')) {
+      return filePath;
+    }
+    const filename = filePath.split('/').pop() || '';
+    return `/api/media/outputs/${filename}`;
+  };
+
   // Active video source: either individual preview scene clip or final assembled video
   const activeVideoUrl = selectedPreviewScene
-    ? `/api/media/clips/${selectedPreviewScene.output_path ? selectedPreviewScene.output_path.split('/').pop() : ''}`
+    ? resolveClipUrl(selectedPreviewScene.output_path)
     : job.final_video_path
-    ? `/api/media/outputs/${job.final_video_path}`
-    : completedScenes.length > 0 && completedScenes[0].output_path
-    ? `/api/media/clips/${completedScenes[0].output_path.split('/').pop()}`
+    ? resolveFinalUrl(job.final_video_path)
+    : completedScenes.length > 0
+    ? resolveClipUrl(completedScenes[0].output_path)
     : null;
 
   const isFinalVideo = !selectedPreviewScene && !!job.final_video_path;
@@ -60,15 +79,7 @@ export const CinemaViewer: React.FC<CinemaViewerProps> = ({
     setIsAssembling(true);
     setAssemblyError(null);
     try {
-      const res = await fetch(`/api/jobs/${job.id}/assemble`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transitionType }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Assembly failed');
-      }
+      await apiClient.assembleVideo(job.id, { transitionType });
       onClearPreviewScene();
       onRefreshJob();
     } catch (err: any) {
@@ -342,7 +353,7 @@ export const CinemaViewer: React.FC<CinemaViewerProps> = ({
 
             {job.final_video_path && (
               <a
-                href={`/api/media/outputs/${job.final_video_path}`}
+                href={resolveFinalUrl(job.final_video_path) || '#'}
                 download={`video_${job.id}.mp4`}
                 className="flex-1 sm:flex-none px-4 py-2.5 rounded-xl font-semibold text-xs text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 flex items-center justify-center gap-1.5 transition"
               >

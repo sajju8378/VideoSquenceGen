@@ -16,6 +16,7 @@ import {
   ArrowRight
 } from 'lucide-react';
 import type { Job, Scene } from '../types.ts';
+import { apiClient } from '../services/apiClient.ts';
 
 interface QueueMonitorProps {
   job: Job;
@@ -52,11 +53,7 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
         acceleratedSpeed,
       };
 
-      await fetch(`/api/jobs/${job.id}/start`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ simulation: simConfig }),
-      });
+      await apiClient.startJobQueue(job.id, simConfig);
       onRefreshJob();
     } catch (err) {
       console.error('Failed to start queue:', err);
@@ -68,11 +65,7 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
   const handleRetryScene = async (sceneId: string, forcedResolution?: string) => {
     setRetryingSceneId(sceneId);
     try {
-      await fetch(`/api/jobs/${job.id}/retry-scene`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sceneId, forcedResolution }),
-      });
+      await apiClient.retryScene(job.id, sceneId, forcedResolution);
       onRefreshJob();
     } catch (err) {
       console.error('Failed to retry scene:', err);

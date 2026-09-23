@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { X, RefreshCw, ScrollText, CheckCircle2, AlertTriangle, Clock, Cpu } from 'lucide-react';
 import type { GPULog } from '../types.ts';
+import { apiClient } from '../services/apiClient.ts';
 
 interface LogsModalProps {
   jobId: string | null;
@@ -16,8 +17,7 @@ export const LogsModal: React.FC<LogsModalProps> = ({ jobId, isOpen, onClose }) 
     if (!jobId) return;
     setIsLoading(true);
     try {
-      const res = await fetch(`/api/jobs/${jobId}/logs`);
-      const data = await res.json();
+      const data = await apiClient.getLogs(jobId);
       setLogs(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('Failed to load GPU logs:', err);
