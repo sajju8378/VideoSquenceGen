@@ -1,0 +1,6 @@
+{
+  "name": "WanScript Video Studio",
+  "description": "Resilient multi-scene Script-to-Video generation pipeline with sequential GPU locking, ZeroGPU memory hygiene, quota backoff, per-scene persistence, and independent ffmpeg assembly.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
