@@ -2,7 +2,7 @@ import express, { Router, Request, Response } from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
 import { dbService } from './db.ts';
-import { splitScriptWithGemini } from './gemini.ts';
+import { splitScriptWithGemini, enhancePromptWithGemini } from './gemini.ts';
 import { processScene, runJobQueue, setJobSimulation, getJobSimulation, globalGPULock, vramTracker } from './gpu_worker.ts';
 import { assembleFinalVideo } from './assembler.ts';
 import { getZeroGPUPythonAppCode, getZeroGPURequirementsTxt, getZeroGPUReadme } from './spaces_exporter.ts';
@@ -15,7 +15,7 @@ apiRouter.use(express.json());
 // 1. Split script using Gemini 3.8 Flash
 apiRouter.post('/split-script', async (req: Request, res: Response) => {
   try {
-    const { script, targetDuration, genreStyle, aspectRatio } = req.body;
+    const { script, targetDuration, genreStyle, aspectRatio, characterAnchor } = req.body;
     if (!script || typeof script !== 'string' || script.trim().length === 0) {
       return res.status(400).json({ error: 'Please provide a valid text script' });
     }
@@ -24,11 +24,32 @@ apiRouter.post('/split-script', async (req: Request, res: Response) => {
       targetSceneDuration: targetDuration ? Number(targetDuration) : 5.0,
       genreStyle,
       aspectRatio,
+      characterAnchor,
     });
 
     res.json(result);
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Failed to split script' });
+  }
+});
+
+// 1.1 Enhance visual prompt with Gemini 3.8 Flash
+apiRouter.post('/enhance-prompt', async (req: Request, res: Response) => {
+  try {
+    const { prompt, characterAnchor, genreStyle, sceneContext } = req.body;
+    if (!prompt || typeof prompt !== 'string') {
+      return res.status(400).json({ error: 'Please provide a prompt to enhance' });
+    }
+
+    const result = await enhancePromptWithGemini(prompt, {
+      characterAnchor,
+      genreStyle,
+      sceneContext,
+    });
+
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to enhance prompt' });
   }
 });
 

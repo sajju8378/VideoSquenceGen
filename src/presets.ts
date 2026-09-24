@@ -14,10 +14,10 @@ export const SCRIPT_PRESETS: ScriptPreset[] = [
     genre: 'Photorealistic Live-Action Epic, IMAX 70mm, Divine Mythological Realism',
     aspectRatio: '16:9',
     durationPerScene: 5.5,
-    script: `Lord Hanuman expands his divine form and leaps fearlessly into the sky towards the distant kingdom of Lanka.
-Soaring across the vast dark blue ocean, his golden skin radiant in the golden sunset rays as waves crash below.
-Holding his divine golden Gada firmly, with royal saffron silk dhoti billowing in the high-altitude storm winds.
-The island fortress of Lanka appears on the horizon with majestic golden spires and torchlit citadels.`,
+    script: `Lord Hanuman stands in a heroic stance atop a rugged Himalayan mountain summit at sunrise, right hand in Abhaya Mudra blessing and holding his golden Gada, overlooking ancient mist-veiled temples.
+Leaping fearlessly into the sky, he expands his divine form and soars across the vast tumultuous dark-teal ocean with waves crashing below.
+Holding his celestial golden Gada firmly forward, his royal vermilion-saffron silk dhoti billows fiercely in high-altitude winds as sunset rays illuminate his golden skin.
+The island fortress of Lanka emerges on the horizon with towering golden spires, torchlit colossal stone ramparts, and ancient citadels.`,
   },
   {
     id: 'cyberpunk_noir',

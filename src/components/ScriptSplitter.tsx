@@ -51,7 +51,7 @@ export const ScriptSplitter: React.FC<ScriptSplitterProps> = ({ onJobCreated }) 
   }>({
     name: 'Lord Hanuman',
     description:
-      'Divine Hindu warrior deity Lord Hanuman with radiant golden-amber skin, powerful muscular physique, ornate Mukut crown with ruby gems, gold armlets, flowing royal vermilion-saffron silk dhoti, holding large golden Gada mace firmly in hand.',
+      'Divine Hindu warrior deity Lord Hanuman with radiant golden-amber skin, powerful muscular physique with defined abdominal definition, ornate golden Mukut crown studded with ruby gems and peacock feather, sacred red Tilak on forehead, noble fearless vanara warrior facial features, sacred golden armlets and beaded kanthamala necklaces, long curving divine tail, flowing royal vermilion-saffron silk dhoti with gold-embroidered waistband, holding large celestial golden Gada mace firmly in hand.',
     imageUrl: null,
     isGenerating: false,
     enforceConsistency: true,
@@ -62,9 +62,11 @@ export const ScriptSplitter: React.FC<ScriptSplitterProps> = ({ onJobCreated }) 
   const [splitError, setSplitError] = useState<string | null>(null);
   const [isCreatingJob, setIsCreatingJob] = useState<boolean>(false);
 
-  // Per-scene image generation loading state
+  // Per-scene image generation & prompt enhancing states
   const [generatingScenes, setGeneratingScenes] = useState<Record<number, boolean>>({});
   const [isBatchGenerating, setIsBatchGenerating] = useState<boolean>(false);
+  const [enhancingSceneIndex, setEnhancingSceneIndex] = useState<number | null>(null);
+  const [isEnhancingAll, setIsEnhancingAll] = useState<boolean>(false);
 
   const handleSelectPreset = (preset: ScriptPreset) => {
     setSelectedPresetId(preset.id);
@@ -79,7 +81,7 @@ export const ScriptSplitter: React.FC<ScriptSplitterProps> = ({ onJobCreated }) 
         ...prev,
         name: 'Lord Hanuman',
         description:
-          'Divine Hindu warrior deity Lord Hanuman with radiant golden-amber skin, powerful muscular physique, ornate Mukut crown with ruby gems, gold armlets, flowing royal vermilion-saffron silk dhoti, holding large golden Gada mace firmly in hand.',
+          'Divine Hindu warrior deity Lord Hanuman with radiant golden-amber skin, powerful muscular physique with defined abdominal definition, ornate golden Mukut crown studded with ruby gems and peacock feather, sacred red Tilak on forehead, noble fearless vanara warrior facial features, sacred golden armlets and beaded kanthamala necklaces, long curving divine tail, flowing royal vermilion-saffron silk dhoti with gold-embroidered waistband, holding large celestial golden Gada mace firmly in hand.',
       }));
     }
   };
@@ -112,6 +114,7 @@ export const ScriptSplitter: React.FC<ScriptSplitterProps> = ({ onJobCreated }) 
         targetDuration,
         genreStyle,
         aspectRatio,
+        characterAnchor: characterAnchor.enforceConsistency ? characterAnchor.description : undefined,
       });
 
       if (data.title) {
@@ -138,22 +141,71 @@ export const ScriptSplitter: React.FC<ScriptSplitterProps> = ({ onJobCreated }) 
     });
   };
 
-  const handleAutoDetailPrompt = (index: number) => {
+  const handleAutoDetailPrompt = async (index: number) => {
     const scene = scenes[index];
-    const enhanced = generateDetailedDiffusionPrompt(scene.narration_text || scene.visual_prompt, genreStyle);
-    handleUpdateScene(index, 'visual_prompt', enhanced);
+    setEnhancingSceneIndex(index);
+    try {
+      const rawPrompt = scene.narration_text || scene.visual_prompt;
+      const res = await apiClient.enhancePrompt(rawPrompt, {
+        characterAnchor: characterAnchor.enforceConsistency ? characterAnchor.description : undefined,
+        genreStyle,
+        sceneContext: `Scene ${index + 1} of ${scenes.length}: ${scene.narration_text}`,
+      });
+      if (res?.enhancedPrompt) {
+        handleUpdateScene(index, 'visual_prompt', res.enhancedPrompt);
+      } else {
+        const fallback = generateDetailedDiffusionPrompt(rawPrompt, genreStyle);
+        handleUpdateScene(index, 'visual_prompt', fallback);
+      }
+    } catch {
+      const fallback = generateDetailedDiffusionPrompt(scene.narration_text || scene.visual_prompt, genreStyle);
+      handleUpdateScene(index, 'visual_prompt', fallback);
+    } finally {
+      setEnhancingSceneIndex(null);
+    }
   };
 
-  const handleEnhanceAllPrompts = () => {
-    setScenes(prev =>
-      prev.map(s => ({
-        ...s,
-        visual_prompt: generateDetailedDiffusionPrompt(s.narration_text || s.visual_prompt, genreStyle),
-      }))
-    );
+  const handleEnhanceAllPrompts = async () => {
+    if (scenes.length === 0) return;
+    setIsEnhancingAll(true);
+    try {
+      const updatedScenes = [...scenes];
+      for (let i = 0; i < updatedScenes.length; i++) {
+        const s = updatedScenes[i];
+        const raw = s.narration_text || s.visual_prompt;
+        try {
+          const res = await apiClient.enhancePrompt(raw, {
+            characterAnchor: characterAnchor.enforceConsistency ? characterAnchor.description : undefined,
+            genreStyle,
+            sceneContext: `Scene ${i + 1} of ${updatedScenes.length}: ${s.narration_text}`,
+          });
+          if (res?.enhancedPrompt) {
+            updatedScenes[i] = { ...updatedScenes[i], visual_prompt: res.enhancedPrompt };
+            continue;
+          }
+        } catch {}
+        updatedScenes[i] = {
+          ...updatedScenes[i],
+          visual_prompt: generateDetailedDiffusionPrompt(raw, genreStyle),
+        };
+      }
+      setScenes(updatedScenes);
+    } finally {
+      setIsEnhancingAll(false);
+    }
   };
 
   // --- Character Consistency Actions ---
+  const handleLoadMasterHanumanPrompt = () => {
+    const masterPrompt =
+      'Divine Hindu warrior deity Lord Hanuman with radiant golden-amber skin, powerful muscular physique with defined abdominal definition, ornate golden Mukut crown studded with rubies and peacock feather, sacred red Tilak on forehead, noble fearless vanara warrior facial features, sacred golden armlets and beaded kanthamala necklaces, long curving divine tail, flowing royal vermilion-saffron silk dhoti, standing in a heroic full-body stance atop a rugged weathered Himalayan mountain cliff summit, right hand raised in divine Abhaya Mudra blessing with radiant glowing Om aura, left hand firmly resting on large golden Gada mace planted on the stone, ancient carved stone Hindu temples (mandirs) with warm glowing oil lamps and mist-veiled valleys at sunrise with volumetric god rays.';
+    setCharacterAnchor(prev => ({
+      ...prev,
+      name: 'Lord Hanuman',
+      description: masterPrompt,
+    }));
+  };
+
   const handleUploadCharacterImage = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -167,10 +219,12 @@ export const ScriptSplitter: React.FC<ScriptSplitterProps> = ({ onJobCreated }) 
   const handleGenerateCharacterAnchor = async () => {
     setCharacterAnchor(prev => ({ ...prev, isGenerating: true }));
     try {
-      const prompt = `${characterAnchor.name}, ${characterAnchor.description}, masterwork portrait, 8k resolution, Unreal Engine 5, cinematic photorealism`;
-      const url = await generateInbuiltImage(prompt, aspectRatio);
+      const masterPrompt = `${characterAnchor.description}, standing in a heroic full-body stance atop a rugged weathered Himalayan mountain cliff summit, overlooking mist-shrouded valleys below, ancient carved stone Hindu temples (mandirs) with warm glowing oil lamps, right hand raised in divine Abhaya Mudra blessing with radiant golden Om aura, left hand firmly resting on large golden Gada mace planted upright on stone, radiant golden sunrise with volumetric god rays breaking through clouds, 16:9 cinematic wide shot, IMAX 70mm, 8K resolution, Unreal Engine 5 realism, NOT flat background, NOT cropped portrait, NOT cartoon, NOT anime, NOT comic, NOT 2D illustration.`;
+      
+      const url = await generateInbuiltImage(masterPrompt, aspectRatio);
       setCharacterAnchor(prev => ({
         ...prev,
+        description: masterPrompt,
         imageUrl: url,
       }));
     } catch (err) {
@@ -206,12 +260,27 @@ export const ScriptSplitter: React.FC<ScriptSplitterProps> = ({ onJobCreated }) 
 
     try {
       // If consistency is locked, inject the character anchor description
-      const fullPrompt = characterAnchor.enforceConsistency
-        ? `${characterAnchor.description}. Cinematic scene action: ${scene.visual_prompt}`
+      const basePrompt = characterAnchor.enforceConsistency
+        ? `${characterAnchor.description}. Scene action: ${scene.visual_prompt}`
         : scene.visual_prompt;
 
+      // Enhance prompt with Gemini / rich background before calling image generation
+      let enhancedPrompt = basePrompt;
+      try {
+        const enhancedRes = await apiClient.enhancePrompt(basePrompt, {
+          characterAnchor: characterAnchor.enforceConsistency ? characterAnchor.description : undefined,
+          genreStyle,
+          sceneContext: `Scene ${index + 1} of ${scenes.length}: ${scene.narration_text}`,
+        });
+        if (enhancedRes?.enhancedPrompt) {
+          enhancedPrompt = enhancedRes.enhancedPrompt;
+        }
+      } catch (enhanceErr) {
+        console.warn('Prompt enhancement fallback:', enhanceErr);
+      }
+
       const randomSeed = Math.floor(Math.random() * 9999999);
-      const url = await generateInbuiltImage(fullPrompt, aspectRatio, randomSeed);
+      const url = await generateInbuiltImage(enhancedPrompt, aspectRatio, randomSeed);
       handleUpdateScene(index, 'image_url', url);
       handleUpdateScene(index, 'image_source', 'inbuilt');
     } catch (err) {
@@ -228,11 +297,25 @@ export const ScriptSplitter: React.FC<ScriptSplitterProps> = ({ onJobCreated }) 
     for (let i = 0; i < scenes.length; i++) {
       setGeneratingScenes(prev => ({ ...prev, [i]: true }));
       try {
-        const fullPrompt = characterAnchor.enforceConsistency
-          ? `${characterAnchor.description}. Cinematic scene action: ${scenes[i].visual_prompt}`
-          : scenes[i].visual_prompt;
-        const seed = 42000 + i * 137;
-        const url = await generateInbuiltImage(fullPrompt, aspectRatio, seed);
+        const s = scenes[i];
+        const basePrompt = characterAnchor.enforceConsistency
+          ? `${characterAnchor.description}. Scene action: ${s.visual_prompt}`
+          : s.visual_prompt;
+
+        let enhancedPrompt = basePrompt;
+        try {
+          const enhancedRes = await apiClient.enhancePrompt(basePrompt, {
+            characterAnchor: characterAnchor.enforceConsistency ? characterAnchor.description : undefined,
+            genreStyle,
+            sceneContext: `Scene ${i + 1} of ${scenes.length}: ${s.narration_text}`,
+          });
+          if (enhancedRes?.enhancedPrompt) {
+            enhancedPrompt = enhancedRes.enhancedPrompt;
+          }
+        } catch {}
+
+        const seed = Math.floor(Math.random() * 9999999) + i * 137;
+        const url = await generateInbuiltImage(enhancedPrompt, aspectRatio, seed);
         handleUpdateScene(i, 'image_url', url);
         handleUpdateScene(i, 'image_source', 'inbuilt');
       } catch (err) {
@@ -703,6 +786,17 @@ export const ScriptSplitter: React.FC<ScriptSplitterProps> = ({ onJobCreated }) 
                 )}
               </button>
 
+              {/* Option C: Load Master Epic Prompt */}
+              <button
+                type="button"
+                onClick={handleLoadMasterHanumanPrompt}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-indigo-300 bg-indigo-950/60 hover:bg-indigo-900/60 border border-indigo-700/50 flex items-center gap-1.5 cursor-pointer transition"
+                title="Load the high-fidelity prompt with Himalayan Mandir cliff summit and Abhaya Mudra"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Load Master Epic Prompt</span>
+              </button>
+
               {characterAnchor.imageUrl && (
                 <button
                   type="button"
@@ -735,13 +829,33 @@ export const ScriptSplitter: React.FC<ScriptSplitterProps> = ({ onJobCreated }) 
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleEnhanceAllPrompts}
+                disabled={isEnhancingAll}
+                className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                title="Automatically expand all scene prompts with character and background details using Gemini"
+              >
+                {isEnhancingAll ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                    <span>Gemini Enhancing Prompts...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Gemini Enhance All Prompts & BG</span>
+                  </>
+                )}
+              </button>
+
               {generationMode === 'inbuilt_image' && (
                 <button
                   type="button"
                   onClick={handleGenerateAllSceneImages}
                   disabled={isBatchGenerating}
                   className="px-3 py-1.5 rounded-lg text-xs font-semibold text-amber-300 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
-                  title="Generate keyframe images for all scenes at once"
+                  title="Generate keyframe images for all scenes at once with character consistency"
                 >
                   {isBatchGenerating ? (
                     <>
@@ -754,18 +868,6 @@ export const ScriptSplitter: React.FC<ScriptSplitterProps> = ({ onJobCreated }) 
                       <span>Generate All Scene Images</span>
                     </>
                   )}
-                </button>
-              )}
-
-              {generationMode === 'prompt' && (
-                <button
-                  type="button"
-                  onClick={handleEnhanceAllPrompts}
-                  className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 flex items-center gap-1.5 transition cursor-pointer"
-                  title="Automatically expand all scene prompts with character and background details"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Auto-Detail All Prompts</span>
                 </button>
               )}
 
@@ -792,6 +894,12 @@ export const ScriptSplitter: React.FC<ScriptSplitterProps> = ({ onJobCreated }) 
                     </span>
                     <span className="font-semibold text-slate-200">Scene {idx + 1}</span>
                     <span className="font-mono text-[11px] text-slate-500">ID: {scene.scene_id}</span>
+                    {characterAnchor.enforceConsistency && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 flex items-center gap-1">
+                        <ShieldCheck className="w-3 h-3 text-indigo-400" />
+                        <span>Anchor Locked</span>
+                      </span>
+                    )}
                     {scene.image_url && (
                       <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
                         <Check className="w-3 h-3" />
@@ -942,11 +1050,21 @@ export const ScriptSplitter: React.FC<ScriptSplitterProps> = ({ onJobCreated }) 
                         <button
                           type="button"
                           onClick={() => handleAutoDetailPrompt(idx)}
-                          className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-300 hover:text-amber-200 bg-amber-500/10 hover:bg-amber-500/20 px-2 py-0.5 rounded border border-amber-500/30 transition cursor-pointer"
-                          title="Expand with character anatomy, costume, background setup & photorealism"
+                          disabled={enhancingSceneIndex === idx}
+                          className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-300 hover:text-amber-200 bg-amber-500/10 hover:bg-amber-500/20 px-2 py-0.5 rounded border border-amber-500/30 transition cursor-pointer disabled:opacity-50"
+                          title="Expand with character anatomy, costume, background setup & photorealism with Gemini"
                         >
-                          <Sparkles className="w-3 h-3 text-amber-400" />
-                          <span>Detail Character & BG</span>
+                          {enhancingSceneIndex === idx ? (
+                            <>
+                              <RefreshCw className="w-3 h-3 animate-spin text-amber-400" />
+                              <span>Gemini Enhancing...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="w-3 h-3 text-amber-400" />
+                              <span>Gemini Enhance Prompt & BG</span>
+                            </>
+                          )}
                         </button>
                       </div>
                       <textarea

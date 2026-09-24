@@ -71,55 +71,65 @@ export function downloadVideoFile(url: string, filename: string) {
 }
 
 // Robust Prompt Expander for Diffusion Models: Enforces explicit Character details, Background setup, and Photorealism
-export function generateDetailedDiffusionPrompt(
-  sentence: string,
-  userGenre?: string
-): string {
-  const clean = sentence.replace(/[.?!]+$/, '').trim();
+export function enrichPromptWithBackgroundAndCinematics(promptText: string, userGenre?: string): string {
+  const clean = promptText
+    .replace(/^cinematic wan 2\.1 video of:?/i, '')
+    .replace(/wan 2\.1/gi, '')
+    .trim();
   const lower = clean.toLowerCase();
 
-  // 1. Mythological Epics: Lord Hanuman / Ramayana
-  if (
+  const isHanuman =
     lower.includes('hanuman') ||
     lower.includes('lanka') ||
     lower.includes('ramayana') ||
     lower.includes('sita') ||
     lower.includes('vanara') ||
-    lower.includes('gada')
-  ) {
-    let actionState = 'soaring horizontally forward through the sky in a determined, heroic flight posture';
-    if (lower.includes('expand') || lower.includes('giant') || lower.includes('leap') || lower.includes('jump')) {
-      actionState = 'leaping into the sky, expanding into a colossal divine cosmic warrior form (Vishwaroopam)';
-    } else if (lower.includes('temple') || lower.includes('palace') || lower.includes('arrive') || lower.includes('citadel')) {
-      actionState = 'approaching the shores of Lanka from the golden sky, commanding presence with divine majesty';
+    lower.includes('gada');
+
+  if (isHanuman) {
+    let actionState = 'heroic full-body standing stance atop a rugged weathered Himalayan mountain cliff summit, right hand raised in divine Abhaya Mudra blessing surrounded by a glowing golden Om aura, left hand firmly resting on a large ornate golden Gada mace planted upright on the rock, long curving divine tail arching gracefully behind back';
+    let bgState = 'rugged weathered Himalayan mountain cliff summit, sprawling mist-shrouded valleys below, ancient Vedic carved stone temples (mandirs) with tiered shikharas and warm glowing sacred oil lamps perched on mountain ridges, radiant golden-hour morning sunrise with dramatic volumetric god rays (crepuscular rays) breaking through soft clouds';
+
+    if (lower.includes('fly') || lower.includes('flight') || lower.includes('soar') || lower.includes('ocean') || lower.includes('wave') || lower.includes('sea')) {
+      actionState = 'soaring horizontally forward through the sky in a determined, heroic flight posture, holding celestial golden Gada forward, muscular physique streamlined in divine velocity, long curled tail trailing behind';
+      bgState = 'vast dark-teal tumultuous ocean with crashing whitecap waves and oceanic spray below, distant volcanic island fortress of Lanka with golden palace towers and glowing citadels on the horizon, dramatic golden-hour sunset sky with intense volumetric god rays breaking through storm clouds';
+    } else if (lower.includes('expand') || lower.includes('giant') || lower.includes('leap') || lower.includes('jump') || lower.includes('cosmic')) {
+      actionState = 'leaping into the sky and expanding into a colossal divine cosmic warrior form (Vishwaroopam), celestial power surging through glowing golden-amber muscles, holding colossal radiant golden Gada';
+      bgState = 'stratospheric altitude between earth and celestial heavens, swirling golden nebula clouds, lightning arcing across the horizon, distant continents and oceans visible below';
+    } else if (lower.includes('temple') || lower.includes('palace') || lower.includes('arrive') || lower.includes('citadel') || lower.includes('fortress') || lower.includes('land')) {
+      actionState = 'approaching the colossal coastal ramparts and guardian gatehouses with fearless divine majesty, holding heavy golden Gada mace ready for destiny';
+      bgState = 'ancient colossal stone carved fortress walls of Lanka, burning torchlights and sacred braziers illuminating towering golden spires against deep indigo twilight';
     }
 
-    return `Lord Hanuman, the divine Hindu warrior deity, towering muscular athletic physique, glowing golden-amber skin tone, wearing an ornate golden Mukut crown studded with jewels, sacred golden armlets and necklaces, billowing royal vermilion saffron silk dhoti fluttering fiercely in high-altitude winds, holding a heavy celestial golden Gada mace firmly in his powerful right hand, determined devoted heroic facial expression, ${actionState}. Background setup: vast dark-teal tumultuous ocean with crashing whitecap waves and oceanic spray below, distant volcanic island of Lanka with golden palace towers and glowing citadels on the horizon, dramatic golden-hour sunset sky with intense volumetric god rays breaking through heavy storm clouds. Cinematography: cinematic tracking side-angle shot, IMAX 70mm, Panavision anamorphic lens, epic atmospheric depth haze, hyper-realistic water droplets. Style: photorealistic live-action movie still, 8K resolution, Unreal Engine 5 render, cinematic lighting, masterwork, NOT cartoon, NOT anime, NOT comic, NOT 2D animation, NOT sketch, NOT bird caricature.`;
+    return `Lord Hanuman, the divine Hindu warrior deity, towering muscular athletic physique with chiseled abdominal definition, glowing radiant golden-amber skin tone, sacred red vermilion Tilak on forehead, noble and fearless vanara warrior facial features, wearing an ornate golden Mukut crown studded with rubies and a peacock feather, sacred golden armlets (bajuband) and beaded kanthamala necklaces, long curving divine tail, billowing royal vermilion-saffron silk dhoti with gold-embroidered waist sash, ${actionState}. Background setup: ${bgState}. Cinematography: Cinematic wide-angle 16:9 shot, IMAX 70mm, Panavision anamorphic lens, golden-hour rim lighting on muscular contours, volumetric atmospheric depth haze, 8K resolution, Unreal Engine 5 render, Octane photorealism, masterwork, NOT flat background, NOT cropped portrait, NOT cartoon, NOT anime, NOT comic, NOT 2D animation, NOT sketch, NOT bird caricature.`;
   }
 
-  // 2. Cyberpunk / Futuristic Sci-Fi
-  if (
-    lower.includes('cyberpunk') ||
-    lower.includes('neon') ||
-    lower.includes('hacker') ||
-    lower.includes('cyborg') ||
-    lower.includes('drone') ||
-    lower.includes('operative')
-  ) {
-    return `Subject: Cyberpunk operative in high-tech carbon-fiber armored trench coat, glowing LED neural interface implants, reflective cybernetic visor, focused posture. Background setup: Rain-drenched futuristic megacity street, towering neon skyscrapers, holographic billboards reflecting on wet asphalt, steam rising from grates, flying hovercrafts in distance. Cinematography: Low-angle tracking cinematic camera, anamorphic blue horizontal lens flares, volumetric fog, Blade Runner 2049 aesthetic. Style: Photorealistic live-action film still, IMAX 70mm, 8k resolution, masterwork, NOT cartoon, NOT comic, NOT 2D animation.`;
+  // Check if prompt already contains background specification
+  const hasBackground =
+    lower.includes('background') ||
+    lower.includes('cliff') ||
+    lower.includes('mountain') ||
+    lower.includes('temple') ||
+    lower.includes('sky') ||
+    lower.includes('ocean') ||
+    lower.includes('valley') ||
+    lower.includes('terrain') ||
+    lower.includes('street') ||
+    lower.includes('city');
+
+  if (!hasBackground) {
+    const genre = userGenre || 'Photorealistic Live-Action Epic, IMAX 70mm';
+    return `${clean}. Background setup: Expansive physical environment with layered depth, textured terrain in foreground, atmospheric mist in midground, architectural landmarks on the horizon, golden-hour cinematic volumetric lighting. Cinematography: Cinematic wide-angle 16:9 shot, IMAX 70mm, 8K resolution, Unreal Engine 5 realism, masterwork, NOT flat background, NOT cropped portrait, NOT cartoon, NOT comic book, NOT 2D animation.`;
   }
 
-  // 3. Deep Sea / Oceanic Abyss
-  if (lower.includes('ocean') || lower.includes('reef') || lower.includes('submersible') || lower.includes('abyss') || lower.includes('marine')) {
-    return `Subject: Deep oceanic exploration. Background setup: Crystal-clear deep navy water, caustic sunlight patterns dancing across dramatic underwater rock arches, vibrant living coral reefs, schools of luminous marine life and floating bioluminescent embers. Cinematography: Underwater IMAX 70mm camera, smooth cinematic drift, volumetric sunbeams piercing the water. Style: BBC Earth National Geographic 8k photorealistic documentary film still, masterwork, NOT cartoon, NOT comic, NOT 2D.`;
-  }
+  return clean;
+}
 
-  // 4. Default / Custom Narrative
-  const genre = userGenre && !userGenre.toLowerCase().includes('cyberpunk')
-    ? userGenre
-    : 'Photorealistic Live-Action Epic, IMAX 70mm';
-
-  return `Cinematic scene depicting: ${clean}. Character details: Lifelike human subjects with realistic facial features, authentic muscle tone, detailed textured attire, expressive heroic posture and natural movement. Background setup: Expansive physical environment with authentic depth, foreground atmospheric haze, textured terrain, and detailed architecture on the horizon. Cinematography: Anamorphic 35mm lens, volumetric cinematic lighting, natural color grading, dynamic camera framing. Style: ${genre}, 8k resolution, IMAX film still, Unreal Engine 5 realism, masterwork, NOT cartoon, NOT comic book, NOT 2D animation, NOT sketch, photorealistic live-action film.`;
+export function generateDetailedDiffusionPrompt(
+  sentence: string,
+  userGenre?: string
+): string {
+  return enrichPromptWithBackgroundAndCinematics(sentence, userGenre);
 }
 
 // In-memory cache for preloaded scene visual images
@@ -137,15 +147,13 @@ async function loadDiffusionImageViaBlob(
     .replace(/wan 2\.1/gi, '')
     .trim();
 
-  // If prompt is short, expand it into full cinematic instruction
-  const fullPrompt = cleanSubject.length > 50
-    ? cleanSubject
-    : generateDetailedDiffusionPrompt(cleanSubject);
+  // Always enrich prompt with layered background, cinematic lighting, and character fidelity
+  const fullPrompt = enrichPromptWithBackgroundAndCinematics(cleanSubject);
 
   const encodedPrompt = encodeURIComponent(fullPrompt);
   const urls = [
-    `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&seed=${seed}&nologo=true`,
     `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&seed=${seed}&model=flux&nologo=true`,
+    `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&seed=${seed}&nologo=true`,
   ];
 
   for (const url of urls) {
@@ -296,7 +304,8 @@ export async function generateInbuiltImage(
   const width = aspectRatio === '9:16' ? 720 : aspectRatio === '1:1' ? 1024 : 1280;
   const height = aspectRatio === '9:16' ? 1280 : aspectRatio === '1:1' ? 1024 : 720;
   const cleanPrompt = prompt.replace(/^cinematic wan 2\.1 video of:?/i, '').trim();
-  const enhancedPrompt = `${cleanPrompt}, 2026 modern cinematic film still, 8k resolution, Unreal Engine 5, hyper-detailed, IMAX 70mm masterpiece, crystal clear focus, high dynamic range, crisp modern lighting, no vintage, no retro, no grain, no vhs, no 80s`;
+  const fullyEnriched = enrichPromptWithBackgroundAndCinematics(cleanPrompt);
+  const enhancedPrompt = `${fullyEnriched}, 2026 modern cinematic film still, 8k resolution, Unreal Engine 5, hyper-detailed, IMAX 70mm masterpiece, crystal clear focus, high dynamic range, crisp modern lighting, no vintage, no retro, no grain, no vhs, no 80s`;
   const actualSeed = seed ?? Math.floor(Math.random() * 9999999);
   const encoded = encodeURIComponent(enhancedPrompt);
 
@@ -569,7 +578,7 @@ async function generateClientVideoClip(
 export const apiClient = {
   async splitScript(
     script: string,
-    options?: { targetDuration?: number; genreStyle?: string; aspectRatio?: string }
+    options?: { targetDuration?: number; genreStyle?: string; aspectRatio?: string; characterAnchor?: string }
   ): Promise<{ title: string; scenes: SplitSceneResult[] }> {
     const hasBackend = await checkBackendAvailability();
     if (hasBackend) {
@@ -581,6 +590,7 @@ export const apiClient = {
           targetDuration: options?.targetDuration,
           genreStyle: options?.genreStyle,
           aspectRatio: options?.aspectRatio,
+          characterAnchor: options?.characterAnchor,
         }),
       });
       if (!res.ok) {
@@ -617,6 +627,39 @@ export const apiClient = {
     return {
       title: projectTitle,
       scenes: fallbackScenes,
+    };
+  },
+
+  async enhancePrompt(
+    prompt: string,
+    options?: { characterAnchor?: string; genreStyle?: string; sceneContext?: string }
+  ): Promise<{ enhancedPrompt: string; backgroundDescription: string; characterDetails: string }> {
+    const hasBackend = await checkBackendAvailability();
+    if (hasBackend) {
+      try {
+        const res = await fetch('/api/enhance-prompt', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt,
+            characterAnchor: options?.characterAnchor,
+            genreStyle: options?.genreStyle,
+            sceneContext: options?.sceneContext,
+          }),
+        });
+        if (res.ok) {
+          return res.json();
+        }
+      } catch (e) {
+        console.warn('Backend enhance-prompt failed, using client enricher', e);
+      }
+    }
+
+    const enhanced = enrichPromptWithBackgroundAndCinematics(prompt, options?.genreStyle);
+    return {
+      enhancedPrompt: enhanced,
+      backgroundDescription: 'Himalayan mountain cliff summit with ancient stone carved temples and sunrise mist',
+      characterDetails: options?.characterAnchor || 'Lord Hanuman divine warrior deity with golden-amber skin, Mukut crown and Gada',
     };
   },
 
