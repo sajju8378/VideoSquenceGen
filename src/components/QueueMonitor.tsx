@@ -240,6 +240,25 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
                 <span>Wan 2.1 Sequential Pipeline</span>
               </span>
 
+              {/* Mode indicator */}
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                <span>
+                  {job.generation_mode === 'image_upload'
+                    ? 'Mode: Image Input'
+                    : job.generation_mode === 'inbuilt_image'
+                    ? 'Mode: Inbuilt Studio Image'
+                    : 'Mode: Diffusion Prompt'}
+                </span>
+              </span>
+
+              {/* Character Consistency Indicator */}
+              {(job.character_anchor_image || job.character_anchor_prompt) && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
+                  <Check className="w-3 h-3 text-indigo-400" />
+                  <span>Character Consistency Active</span>
+                </span>
+              )}
+
               {/* Auto-Advance Toggle Badge */}
               <button
                 onClick={() => {
@@ -582,13 +601,33 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
                 {/* Header Row */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div className="flex items-center gap-2.5">
-                    <span className="w-7 h-7 rounded-lg bg-slate-800 text-slate-200 font-mono text-xs font-bold flex items-center justify-center border border-slate-700">
-                      {idx + 1}
-                    </span>
+                    {/* Scene Image Keyframe Thumbnail if available */}
+                    {scene.image_url || job.character_anchor_image ? (
+                      <div className="w-14 h-9 rounded-lg overflow-hidden bg-slate-900 border border-slate-700 shrink-0 relative shadow-sm">
+                        <img
+                          src={scene.image_url || job.character_anchor_image || ''}
+                          alt={`Keyframe ${idx + 1}`}
+                          className="w-full h-full object-cover"
+                        />
+                        <span className="absolute bottom-0 right-0 bg-slate-950/80 text-[9px] font-bold text-slate-300 px-1 rounded-tl">
+                          #{idx + 1}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="w-7 h-7 rounded-lg bg-slate-800 text-slate-200 font-mono text-xs font-bold flex items-center justify-center border border-slate-700 shrink-0">
+                        {idx + 1}
+                      </span>
+                    )}
+
                     <div>
                       <h4 className="text-sm font-bold text-white flex items-center gap-2">
                         <span>Video Scene {idx + 1}</span>
                         <span className="font-mono text-[10px] text-slate-500 font-normal">[{scene.id}]</span>
+                        {scene.image_url && (
+                          <span className="text-[10px] px-1.5 py-0.2 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded font-medium">
+                            Keyframe Locked
+                          </span>
+                        )}
                       </h4>
                       <span className="text-[11px] text-slate-400 font-mono">
                         Target Duration: {Number(scene.target_duration_seconds).toFixed(1)}s • {scene.resolution || '720p'}

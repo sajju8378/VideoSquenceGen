@@ -71,6 +71,12 @@ db.exec(`
   );
 `);
 
+// Safe column migrations for existing databases
+try { db.exec('ALTER TABLE jobs ADD COLUMN generation_mode TEXT;'); } catch {}
+try { db.exec('ALTER TABLE jobs ADD COLUMN character_anchor_image TEXT;'); } catch {}
+try { db.exec('ALTER TABLE jobs ADD COLUMN character_anchor_prompt TEXT;'); } catch {}
+try { db.exec('ALTER TABLE scenes ADD COLUMN image_url TEXT;'); } catch {}
+
 export const dbService = {
   getPaths() {
     return {
@@ -86,10 +92,22 @@ export const dbService = {
   createJob(job: Omit<JobRecord, 'created_at' | 'updated_at' | 'assembly_status' | 'final_video_path' | 'error'>): JobRecord {
     const now = new Date().toISOString();
     const stmt = db.prepare(`
-      INSERT INTO jobs (id, title, script, status, target_resolution, aspect_ratio, created_at, updated_at, assembly_status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'idle')
+      INSERT INTO jobs (id, title, script, status, target_resolution, aspect_ratio, created_at, updated_at, assembly_status, generation_mode, character_anchor_image, character_anchor_prompt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?, ?)
     `);
-    stmt.run(job.id, job.title, job.script, job.status, job.target_resolution, job.aspect_ratio, now, now);
+    stmt.run(
+      job.id,
+      job.title,
+      job.script,
+      job.status,
+      job.target_resolution,
+      job.aspect_ratio,
+      now,
+      now,
+      job.generation_mode || 'prompt',
+      job.character_anchor_image || null,
+      job.character_anchor_prompt || null
+    );
 
     return this.getJob(job.id)!;
   },
@@ -145,8 +163,8 @@ export const dbService = {
   addScene(scene: Omit<SceneRecord, 'created_at' | 'updated_at' | 'attempt_count' | 'last_error' | 'output_path' | 'audio_path'>): SceneRecord {
     const now = new Date().toISOString();
     const stmt = db.prepare(`
-      INSERT INTO scenes (id, job_id, scene_index, narration_text, visual_prompt, target_duration_seconds, status, attempt_count, resolution, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+      INSERT INTO scenes (id, job_id, scene_index, narration_text, visual_prompt, target_duration_seconds, status, attempt_count, resolution, image_url, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
     `);
     stmt.run(
       scene.id,
@@ -157,6 +175,7 @@ export const dbService = {
       scene.target_duration_seconds,
       scene.status,
       scene.resolution,
+      scene.image_url || null,
       now,
       now
     );

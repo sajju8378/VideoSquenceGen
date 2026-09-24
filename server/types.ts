@@ -1,5 +1,6 @@
 export type SceneStatus = 'pending' | 'generating' | 'waiting_quota' | 'done' | 'failed';
 export type JobStatus = 'draft' | 'queued' | 'processing' | 'paused' | 'completed' | 'failed';
+export type VideoGenerationMode = 'prompt' | 'image_upload' | 'inbuilt_image';
 
 export interface SceneRecord {
   id: string;
@@ -14,6 +15,7 @@ export interface SceneRecord {
   output_path: string | null;
   audio_path: string | null;
   resolution: string;
+  image_url?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -30,6 +32,9 @@ export interface JobRecord {
   final_video_path: string | null;
   assembly_status: 'idle' | 'assembling' | 'completed' | 'failed';
   error: string | null;
+  generation_mode?: VideoGenerationMode;
+  character_anchor_image?: string | null;
+  character_anchor_prompt?: string | null;
   scenes?: SceneRecord[];
 }
 
@@ -51,4 +56,6 @@ export interface SplitSceneResult {
   narration_text: string;
   visual_prompt: string;
   target_duration_seconds: number;
+  image_url?: string;
+  image_source?: 'upload' | 'inbuilt' | 'character_anchor' | 'none';
 }

@@ -35,7 +35,17 @@ apiRouter.post('/split-script', async (req: Request, res: Response) => {
 // 2. Create a new job with scenes
 apiRouter.post('/jobs', async (req: Request, res: Response) => {
   try {
-    const { title, script, targetResolution, aspectRatio, scenes, simulation } = req.body;
+    const {
+      title,
+      script,
+      targetResolution,
+      aspectRatio,
+      scenes,
+      simulation,
+      generationMode,
+      characterAnchorImage,
+      characterAnchorPrompt,
+    } = req.body;
     if (!script || !Array.isArray(scenes) || scenes.length === 0) {
       return res.status(400).json({ error: 'Job must contain a script and at least one scene' });
     }
@@ -49,6 +59,9 @@ apiRouter.post('/jobs', async (req: Request, res: Response) => {
       status: 'draft',
       target_resolution: targetResolution || '720p',
       aspect_ratio: aspectRatio || '16:9',
+      generation_mode: generationMode || 'prompt',
+      character_anchor_image: characterAnchorImage || null,
+      character_anchor_prompt: characterAnchorPrompt || null,
     });
 
     scenes.forEach((s: any, idx: number) => {
@@ -62,6 +75,7 @@ apiRouter.post('/jobs', async (req: Request, res: Response) => {
         target_duration_seconds: Number(s.target_duration_seconds) || 5.0,
         status: 'pending',
         resolution: targetResolution || '720p',
+        image_url: s.image_url || characterAnchorImage || null,
       });
     });
 

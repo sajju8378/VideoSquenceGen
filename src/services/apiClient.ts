@@ -1,4 +1,4 @@
-import type { Job, Scene, GPULog, SplitSceneResult } from '../types.ts';
+import type { Job, Scene, GPULog, SplitSceneResult, VideoGenerationMode } from '../types.ts';
 import { getZeroGPUPythonAppCode, getZeroGPURequirementsTxt, getZeroGPUReadme } from '../../server/spaces_exporter.ts';
 
 // Detect whether backend /api is responding
@@ -287,35 +287,86 @@ function drawAtmosphericScenicFallback(
   ctx.stroke();
 }
 
-// Helper: Generate photorealistic cinematic AI video clip with camera motion and audio
+// Inbuilt Studio Image Generator: Generates pristine high-res images for scenes or master character anchor
+export async function generateInbuiltImage(
+  prompt: string,
+  aspectRatio: '16:9' | '9:16' | '1:1',
+  seed?: number
+): Promise<string> {
+  const width = aspectRatio === '9:16' ? 720 : aspectRatio === '1:1' ? 1024 : 1280;
+  const height = aspectRatio === '9:16' ? 1280 : aspectRatio === '1:1' ? 1024 : 720;
+  const cleanPrompt = prompt.replace(/^cinematic wan 2\.1 video of:?/i, '').trim();
+  const enhancedPrompt = `${cleanPrompt}, 2026 modern cinematic film still, 8k resolution, Unreal Engine 5, hyper-detailed, IMAX 70mm masterpiece, crystal clear focus, high dynamic range, crisp modern lighting, no vintage, no retro, no grain, no vhs, no 80s`;
+  const actualSeed = seed ?? Math.floor(Math.random() * 9999999);
+  const encoded = encodeURIComponent(enhancedPrompt);
+
+  const urls = [
+    `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&seed=${actualSeed}&model=flux&nologo=true`,
+    `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&seed=${actualSeed}&nologo=true`,
+  ];
+
+  for (const url of urls) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 12000);
+      const res = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (res.ok) {
+        const blob = await res.blob();
+        if (blob.size > 1000) {
+          return URL.createObjectURL(blob);
+        }
+      }
+    } catch {}
+  }
+
+  return urls[0];
+}
+
+// Helper: Generate modern 2026 photorealistic cinematic video clip with camera motion and audio
 async function generateClientVideoClip(
   text: string,
   durationSec: number,
   resolution: string,
   aspectRatio: '16:9' | '9:16' | '1:1',
   sceneIndex: number = 0,
-  narrationText: string = ''
+  narrationText: string = '',
+  customImageUrl?: string
 ): Promise<string> {
-  const width = aspectRatio === '9:16' ? 405 : aspectRatio === '1:1' ? 512 : 720;
-  const height = aspectRatio === '9:16' ? 720 : aspectRatio === '1:1' ? 512 : 405;
+  // True High-Definition canvas dimensions (1280x720 for 720p, 1920x1080 for 1080p)
+  const is1080p = resolution === '1080p';
+  const width = aspectRatio === '9:16' ? (is1080p ? 720 : 540) : aspectRatio === '1:1' ? (is1080p ? 1080 : 720) : (is1080p ? 1920 : 1280);
+  const height = aspectRatio === '9:16' ? (is1080p ? 1280 : 960) : aspectRatio === '1:1' ? (is1080p ? 1080 : 720) : (is1080p ? 1080 : 720);
 
   const cleanSubject = text
     .replace(/^cinematic wan 2\.1 video of:?/i, '')
     .replace(/wan 2\.1/gi, '')
     .trim();
-  const enhancedVisualPrompt = `${cleanSubject}, cinematic photo, high detail 8k, epic volumetric lighting, masterwork composition`;
   const seed = Math.abs(text.split('').reduce((acc, c) => (acc * 33 + c.charCodeAt(0)) | 0, sceneIndex * 1337 + 7));
-  const aiImageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(enhancedVisualPrompt)}?width=${width}&height=${height}&seed=${seed}&nologo=true`;
 
-  const cacheKey = `${text}_${sceneIndex}_${aspectRatio}`;
   let img: HTMLImageElement | null = null;
 
-  if (sceneImageCache.has(cacheKey) && sceneImageCache.get(cacheKey)!.complete && sceneImageCache.get(cacheKey)!.naturalWidth > 0) {
-    img = sceneImageCache.get(cacheKey)!;
+  // 1. If user provided their own uploaded image or inbuilt studio image, load it directly
+  if (customImageUrl) {
+    img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.src = customImageUrl;
+    await new Promise<void>(resolve => {
+      if (img!.complete && img!.naturalWidth > 0) return resolve();
+      img!.onload = () => resolve();
+      img!.onerror = () => resolve();
+      setTimeout(resolve, 8000);
+    });
   } else {
-    img = await loadDiffusionImageViaBlob(text, width, height, seed);
-    if (img) {
-      sceneImageCache.set(cacheKey, img);
+    // 2. Otherwise load via modern diffusion pipeline
+    const cacheKey = `${text}_${sceneIndex}_${aspectRatio}`;
+    if (sceneImageCache.has(cacheKey) && sceneImageCache.get(cacheKey)!.complete && sceneImageCache.get(cacheKey)!.naturalWidth > 0) {
+      img = sceneImageCache.get(cacheKey)!;
+    } else {
+      img = await loadDiffusionImageViaBlob(text, width, height, seed);
+      if (img) {
+        sceneImageCache.set(cacheKey, img);
+      }
     }
   }
 
@@ -325,82 +376,60 @@ async function generateClientVideoClip(
   const ctx = canvas.getContext('2d');
   if (!ctx) return '';
 
-  const clipSeconds = Math.max(4, Math.min(10, Math.round(Number(durationSec) || 6)));
+  const clipSeconds = Math.max(3.5, Math.min(10, Math.round(Number(durationSec) || 5)));
 
   const drawSceneVisual = (progress: number) => {
-    // 1. If AI Photorealistic Image Loaded: Smooth Cinematic Ken Burns Motion
+    // Modern 2026 Photorealistic Cinematic Presentation: Smooth 3D Ken Burns Motion
     if (img && img.complete && img.naturalWidth > 0) {
       ctx.save();
-      const zoom = 1.0 + progress * 0.12;
-      const panX = Math.sin(progress * Math.PI) * (width * 0.035);
-      const panY = (progress - 0.5) * (height * 0.025);
+      // Smooth cinematic camera drift with subtle natural zoom (NO 80s scanline artifacts)
+      const zoom = 1.0 + progress * 0.08;
+      const panX = (progress - 0.5) * (width * 0.03);
+      const panY = (progress - 0.5) * (height * 0.015);
 
       ctx.translate(width / 2 + panX, height / 2 + panY);
       ctx.scale(zoom, zoom);
       ctx.drawImage(img, -width / 2, -height / 2, width, height);
       ctx.restore();
 
-      // Atmospheric volumetric lighting sweep
-      const flareX = width * (0.15 + progress * 0.7);
-      const flareGrad = ctx.createRadialGradient(flareX, height * 0.35, 15, flareX, height * 0.35, width * 0.6);
-      flareGrad.addColorStop(0, 'rgba(255, 235, 200, 0.22)');
-      flareGrad.addColorStop(0.35, 'rgba(255, 180, 100, 0.1)');
+      // Modern cinematic subtle lighting flare (warm natural glow, not 80s tape line)
+      const flareX = width * (0.2 + progress * 0.6);
+      const flareGrad = ctx.createRadialGradient(flareX, height * 0.3, 10, flareX, height * 0.3, width * 0.5);
+      flareGrad.addColorStop(0, 'rgba(255, 240, 210, 0.12)');
+      flareGrad.addColorStop(0.5, 'rgba(255, 200, 140, 0.04)');
       flareGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
       ctx.fillStyle = flareGrad;
       ctx.fillRect(0, 0, width, height);
-
-      // Anamorphic horizontal optical light streak
-      const streakY = height * 0.38 + Math.sin(progress * 2) * 8;
-      const streakGrad = ctx.createLinearGradient(0, streakY, width, streakY);
-      streakGrad.addColorStop(0, 'rgba(56, 189, 248, 0)');
-      streakGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.32)');
-      streakGrad.addColorStop(1, 'rgba(56, 189, 248, 0)');
-      ctx.fillStyle = streakGrad;
-      ctx.fillRect(0, streakY - 1, width, 2);
-
-      // Floating cinematic atmospheric embers
-      for (let p = 0; p < 20; p++) {
-        const px = (p * 47 + progress * 90) % width;
-        const py = (p * 37 + Math.sin(progress * 3 + p) * 16 + height * 0.25) % height;
-        const alpha = 0.25 + Math.sin(progress * 5 + p) * 0.2;
-        ctx.fillStyle = `rgba(255, 245, 215, ${Math.max(0, alpha)})`;
-        ctx.beginPath();
-        ctx.arc(px, py, 1.2 + (p % 2) * 0.6, 0, Math.PI * 2);
-        ctx.fill();
-      }
     } else {
       // Atmospheric scenic fallback (pure lighting and waves, no cartoon shapes)
       drawAtmosphericScenicFallback(ctx, width, height, progress);
     }
 
-    // 2. Cinematic Widescreen Letterbox Bars
-    const letterboxH = height * 0.07;
-    ctx.fillStyle = '#05070d';
-    ctx.fillRect(0, 0, width, letterboxH);
-    ctx.fillRect(0, height - letterboxH, width, letterboxH);
-
-    // Golden accent border
-    ctx.fillStyle = 'rgba(234, 179, 8, 0.3)';
-    ctx.fillRect(0, letterboxH, width, 1);
-    ctx.fillRect(0, height - letterboxH - 1, width, 1);
-
-    // 3. Elegant Netflix-Style Lower-Third Subtitle for Narration
+    // Modern Minimalist Subtitles (Clean Apple TV / Netflix style, NO retro box)
     const subText = narrationText || cleanSubject;
-    if (subText) {
-      const cleanSub = subText.substring(0, 95);
-      ctx.fillStyle = 'rgba(6, 9, 16, 0.88)';
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
-      ctx.lineWidth = 1;
+    if (subText && subText.length > 0) {
+      const cleanSub = subText.substring(0, 110);
+      ctx.save();
+      const fontSize = Math.max(14, Math.round(width * 0.022));
+      ctx.font = `600 ${fontSize}px system-ui, -apple-system, sans-serif`;
+      const textMetrics = ctx.measureText(cleanSub);
+      const pillWidth = Math.min(width - 40, textMetrics.width + 36);
+      const pillHeight = fontSize + 18;
+      const pillX = (width - pillWidth) / 2;
+      const pillY = height - pillHeight - 24;
+
+      ctx.fillStyle = 'rgba(10, 15, 28, 0.72)';
       ctx.beginPath();
-      ctx.roundRect(16, height - letterboxH - 36, width - 32, 30, 6);
+      ctx.roundRect(pillX, pillY, pillWidth, pillHeight, pillHeight / 2);
       ctx.fill();
-      ctx.stroke();
 
       ctx.fillStyle = '#ffffff';
-      ctx.font = '600 12px "Plus Jakarta Sans", sans-serif';
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.75)';
+      ctx.shadowBlur = 4;
       ctx.textAlign = 'center';
-      ctx.fillText(`"${cleanSub}${subText.length > 95 ? '...' : ''}"`, width / 2, height - letterboxH - 17);
-      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(cleanSub, width / 2, pillY + pillHeight / 2);
+      ctx.restore();
     }
   };
 
@@ -414,7 +443,7 @@ async function generateClientVideoClip(
     });
   }
 
-  // 2. Synthesize Cinematic Ambient Audio Track via Web Audio API
+  // 2. Synthesize High-Fidelity Cinematic Ambient Audio Track via Web Audio API
   let audioStreamTrack: MediaStreamTrack | null = null;
   try {
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
@@ -422,44 +451,31 @@ async function generateClientVideoClip(
       const audioCtx = new AudioContextClass();
       const dest = audioCtx.createMediaStreamDestination();
 
-      // Deep cinematic drone rumble
+      // Deep cinematic sub-bass drone
       const osc = audioCtx.createOscillator();
       const gainNode = audioCtx.createGain();
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(55, audioCtx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(65, audioCtx.currentTime + clipSeconds);
+      osc.frequency.setValueAtTime(48, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(56, audioCtx.currentTime + clipSeconds);
       gainNode.gain.setValueAtTime(0.01, audioCtx.currentTime);
-      gainNode.gain.linearRampToValueAtTime(0.16, audioCtx.currentTime + 0.8);
+      gainNode.gain.linearRampToValueAtTime(0.12, audioCtx.currentTime + 0.6);
       gainNode.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + clipSeconds);
-
-      // Shimmer harmonic overtone
-      const osc2 = audioCtx.createOscillator();
-      const gainNode2 = audioCtx.createGain();
-      osc2.type = 'triangle';
-      osc2.frequency.setValueAtTime(110, audioCtx.currentTime);
-      gainNode2.gain.setValueAtTime(0.01, audioCtx.currentTime);
-      gainNode2.gain.linearRampToValueAtTime(0.05, audioCtx.currentTime + 1.2);
-      gainNode2.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + clipSeconds);
 
       osc.connect(gainNode);
       gainNode.connect(dest);
-      osc2.connect(gainNode2);
-      gainNode2.connect(dest);
-
       osc.start();
-      osc2.start();
       osc.stop(audioCtx.currentTime + clipSeconds + 0.5);
-      osc2.stop(audioCtx.currentTime + clipSeconds + 0.5);
 
       if (dest.stream.getAudioTracks().length > 0) {
         audioStreamTrack = dest.stream.getAudioTracks()[0];
       }
     }
   } catch {
-    // Audio track is progressive enhancement
+    // Audio track progressive enhancement
   }
 
-  const fps = 20;
+  // Modern 30 FPS smooth rendering with 6.5 Mbps bitrate
+  const fps = 30;
   const canvasStream = canvas.captureStream(fps);
   const streamTracks: MediaStreamTrack[] = [...canvasStream.getVideoTracks()];
   if (audioStreamTrack) {
@@ -477,7 +493,7 @@ async function generateClientVideoClip(
 
   let recorder: MediaRecorder;
   try {
-    recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2800000 });
+    recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 6500000 });
   } catch {
     recorder = new MediaRecorder(stream);
   }
@@ -518,28 +534,24 @@ async function generateClientVideoClip(
     }
 
     const totalFrames = clipSeconds * fps;
-    let frame = 0;
+    let currentFrame = 0;
 
     const interval = setInterval(() => {
-      frame++;
-      const progress = Math.min(1.0, frame / totalFrames);
+      currentFrame++;
+      const progress = Math.min(1.0, currentFrame / totalFrames);
       drawSceneVisual(progress);
 
-      if (frame >= totalFrames) {
+      if (currentFrame >= totalFrames) {
         clearInterval(interval);
         setTimeout(() => {
           try {
-            if (recorder.state === 'recording') {
-              recorder.stop();
-            } else {
-              finish();
-            }
+            if (recorder.state === 'recording') recorder.stop();
           } catch {
             finish();
           }
-        }, 100);
+        }, 150);
       }
-    }, 50);
+    }, 1000 / fps);
 
     // Watchdog safety timeout (clipSeconds + 2s) so recording always completes cleanly
     setTimeout(() => {
@@ -615,6 +627,9 @@ export const apiClient = {
     aspectRatio: '16:9' | '9:16';
     scenes: SplitSceneResult[];
     simulation?: any;
+    generationMode?: VideoGenerationMode;
+    characterAnchorImage?: string | null;
+    characterAnchorPrompt?: string | null;
   }): Promise<Job> {
     const hasBackend = await checkBackendAvailability();
     if (hasBackend) {
@@ -639,6 +654,9 @@ export const apiClient = {
       status: 'draft',
       target_resolution: params.targetResolution || '720p',
       aspect_ratio: params.aspectRatio || '16:9',
+      generation_mode: params.generationMode || 'prompt',
+      character_anchor_image: params.characterAnchorImage || null,
+      character_anchor_prompt: params.characterAnchorPrompt || null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       final_video_path: null,
@@ -652,6 +670,7 @@ export const apiClient = {
         narration_text: s.narration_text,
         visual_prompt: s.visual_prompt,
         target_duration_seconds: s.target_duration_seconds,
+        image_url: s.image_url || params.characterAnchorImage || null,
         status: 'pending',
         attempt_count: 0,
         last_error: null,
@@ -766,7 +785,8 @@ export const apiClient = {
           scene.resolution,
           job.aspect_ratio,
           scene.scene_index,
-          scene.narration_text
+          scene.narration_text,
+          scene.image_url || job.character_anchor_image || undefined
         );
 
         scene.status = 'done';
@@ -856,7 +876,8 @@ export const apiClient = {
       scene.resolution,
       job.aspect_ratio,
       scene.scene_index,
-      scene.narration_text
+      scene.narration_text,
+      scene.image_url || job.character_anchor_image || undefined
     );
 
     // 3. Mark complete & release GPU lock
