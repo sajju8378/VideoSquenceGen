@@ -22,7 +22,7 @@ function htmlPlugin(): Plugin {
     transformIndexHtml: {
       order: 'pre',
       handler(html) {
-        return html.replace('./assets/app.js', '/src/main.tsx');
+        return html.replace('./assets/app-v3.js', '/src/main.tsx');
       },
     },
   };
@@ -40,11 +40,11 @@ export default defineConfig(() => {
     build: {
       rollupOptions: {
         output: {
-          entryFileNames: 'assets/app.js',
+          entryFileNames: 'assets/app-v3.js',
           chunkFileNames: 'assets/[name].js',
           assetFileNames: (assetInfo) => {
             if (assetInfo.name && assetInfo.name.endsWith('.css')) {
-              return 'assets/app.css';
+              return 'assets/app-v3.css';
             }
             return 'assets/[name][extname]';
           },
