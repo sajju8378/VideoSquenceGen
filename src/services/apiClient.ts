@@ -434,28 +434,140 @@ async function generateClientVideoClip(
 
   const clipSeconds = Math.max(3.5, Math.min(10, Math.round(Number(durationSec) || 5)));
 
+  // Pre-seed deterministic divine aura & atmospheric floating embers
+  const particleCount = 42;
+  const particles = Array.from({ length: particleCount }, (_, i) => {
+    const pSeed = (seed * 19 + i * 37) % 10000;
+    return {
+      startX: (pSeed % 1000) / 1000,
+      startY: ((pSeed * 7) % 1000) / 1000,
+      speed: 0.25 + (((pSeed * 13) % 100) / 100) * 0.45,
+      driftFreq: 2 + (i % 4),
+      driftAmp: 0.02 + (((pSeed * 17) % 100) / 100) * 0.04,
+      radius: 1.8 + (((pSeed * 23) % 100) / 100) * 3.5,
+      hue: (i % 3 === 0) ? 42 : (i % 3 === 1) ? 36 : 48, // Golden amber hues
+      alpha: 0.35 + (((pSeed * 31) % 100) / 100) * 0.5,
+    };
+  });
+
   const drawSceneVisual = (progress: number) => {
+    ctx.clearRect(0, 0, width, height);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+
     // Modern 2026 Photorealistic Cinematic Presentation: Smooth 3D Ken Burns Motion
     if (img && img.complete && img.naturalWidth > 0) {
       ctx.save();
-      // Smooth cinematic camera drift with subtle natural zoom (NO 80s scanline artifacts)
-      const zoom = 1.0 + progress * 0.08;
-      const panX = (progress - 0.5) * (width * 0.03);
-      const panY = (progress - 0.5) * (height * 0.015);
 
-      ctx.translate(width / 2 + panX, height / 2 + panY);
+      // Smooth cinematic cubic easing
+      const ep = progress < 0.5
+        ? 4 * progress * progress * progress
+        : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+
+      // Dynamic shot selection per scene index
+      const shotType = sceneIndex % 4;
+      let zoom = 1.15;
+      let panX = 0;
+      let panY = 0;
+
+      if (shotType === 0) {
+        // Dramatic Hero Push-In & Upward Tilt towards crown/sky
+        zoom = 1.08 + ep * 0.32;
+        panY = (0.08 - ep * 0.16) * height;
+        panX = Math.sin(progress * Math.PI) * (width * 0.04);
+      } else if (shotType === 1) {
+        // Dynamic Flight Tracking / Sweeping Pan Across Horizon & Sea
+        zoom = 1.14 + ep * 0.26;
+        panX = (ep - 0.5) * (width * 0.18);
+        panY = (0.04 - ep * 0.08) * height;
+      } else if (shotType === 2) {
+        // Epic Power Pull-Back & Reveal (hero close-up pulling back to vast epic expanse)
+        zoom = 1.38 - ep * 0.28;
+        panY = (-0.08 + ep * 0.12) * height;
+        panX = (0.5 - ep) * (width * 0.08);
+      } else {
+        // 2.5D Aerial Orbital Drift
+        zoom = 1.12 + Math.sin(progress * Math.PI) * 0.22;
+        panX = (0.5 - ep) * (width * 0.16);
+        panY = Math.cos(progress * Math.PI) * (height * 0.04);
+      }
+
+      // Micro handheld 35mm IMAX camera breathing
+      const breathX = Math.sin(progress * Math.PI * 6) * (width * 0.003);
+      const breathY = Math.cos(progress * Math.PI * 4) * (height * 0.003);
+
+      ctx.translate(width / 2 + panX + breathX, height / 2 + panY + breathY);
       ctx.scale(zoom, zoom);
       ctx.drawImage(img, -width / 2, -height / 2, width, height);
       ctx.restore();
 
-      // Modern cinematic subtle lighting flare (warm natural glow, not 80s tape line)
-      const flareX = width * (0.2 + progress * 0.6);
-      const flareGrad = ctx.createRadialGradient(flareX, height * 0.3, 10, flareX, height * 0.3, width * 0.5);
-      flareGrad.addColorStop(0, 'rgba(255, 240, 210, 0.12)');
-      flareGrad.addColorStop(0.5, 'rgba(255, 200, 140, 0.04)');
+      // 1. Dynamic Volumetric God Rays / Celestial Sunbeams (Sweeping across the sky)
+      ctx.save();
+      const raySourceX = width * 0.5 + Math.sin(progress * Math.PI * 2) * (width * 0.15);
+      const raySourceY = height * 0.18;
+      const rayAngleOffset = (progress - 0.5) * 0.3;
+      for (let r = 0; r < 5; r++) {
+        const baseAngle = (r - 2) * 0.35 + rayAngleOffset;
+        const rayLen = width * 1.2;
+        const rx2 = raySourceX + Math.sin(baseAngle) * rayLen;
+        const ry2 = raySourceY + Math.cos(baseAngle) * rayLen;
+
+        const rayGrad = ctx.createLinearGradient(raySourceX, raySourceY, rx2, ry2);
+        const rayIntensity = (0.06 + Math.sin(progress * Math.PI * 3 + r) * 0.03);
+        rayGrad.addColorStop(0, `rgba(255, 235, 170, ${rayIntensity * 1.5})`);
+        rayGrad.addColorStop(0.5, `rgba(255, 210, 120, ${rayIntensity * 0.7})`);
+        rayGrad.addColorStop(1, 'rgba(255, 200, 100, 0)');
+
+        ctx.fillStyle = rayGrad;
+        ctx.beginPath();
+        ctx.moveTo(raySourceX, raySourceY);
+        ctx.lineTo(rx2 - width * 0.08, ry2);
+        ctx.lineTo(rx2 + width * 0.08, ry2);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.restore();
+
+      // 2. Divine Rising Aura Particles / Golden Embers (Animated at 30 FPS)
+      ctx.save();
+      for (const p of particles) {
+        // Continuous upward floating motion with sinusoidal sway
+        const currentYNorm = ((p.startY - progress * p.speed * 2) % 1 + 1) % 1;
+        const px = (p.startX * width + Math.sin(progress * Math.PI * p.driftFreq + p.startY * 10) * (width * p.driftAmp));
+        const py = currentYNorm * height;
+        const pRadius = p.radius * (0.8 + Math.sin(progress * Math.PI * 4 + p.startX * 5) * 0.3);
+
+        const pGrad = ctx.createRadialGradient(px, py, 0, px, py, pRadius * 2.8);
+        pGrad.addColorStop(0, `hsla(${p.hue}, 100%, 75%, ${p.alpha})`);
+        pGrad.addColorStop(0.4, `hsla(${p.hue}, 95%, 60%, ${p.alpha * 0.6})`);
+        pGrad.addColorStop(1, `hsla(${p.hue}, 90%, 50%, 0)`);
+
+        ctx.fillStyle = pGrad;
+        ctx.beginPath();
+        ctx.arc(px, py, pRadius * 2.8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+
+      // 3. Cinematic Atmospheric Horizon Mist & Dynamic Flare
+      ctx.save();
+      const mistGrad = ctx.createLinearGradient(0, height * 0.72, 0, height);
+      const mistAlpha = 0.14 + Math.sin(progress * Math.PI * 2) * 0.04;
+      mistGrad.addColorStop(0, 'rgba(20, 30, 48, 0)');
+      mistGrad.addColorStop(1, `rgba(25, 40, 65, ${mistAlpha})`);
+      ctx.fillStyle = mistGrad;
+      ctx.fillRect(0, height * 0.7, width, height * 0.3);
+
+      // Warm radial lens flare drifting across the frame
+      const flareX = width * (0.15 + progress * 0.7);
+      const flareY = height * (0.22 + Math.sin(progress * Math.PI) * 0.08);
+      const flareGrad = ctx.createRadialGradient(flareX, flareY, 5, flareX, flareY, width * 0.55);
+      flareGrad.addColorStop(0, 'rgba(255, 245, 215, 0.18)');
+      flareGrad.addColorStop(0.35, 'rgba(255, 205, 120, 0.07)');
       flareGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
       ctx.fillStyle = flareGrad;
       ctx.fillRect(0, 0, width, height);
+      ctx.restore();
     } else {
       // Atmospheric scenic fallback (pure lighting and waves, no cartoon shapes)
       drawAtmosphericScenicFallback(ctx, width, height, progress);
@@ -619,6 +731,13 @@ async function generateClientVideoClip(
       currentFrame++;
       const progress = Math.min(1.0, currentFrame / totalFrames);
       drawSceneVisual(progress);
+
+      const videoTrack = canvasStream.getVideoTracks()[0];
+      if (videoTrack && (videoTrack as any).requestFrame) {
+        try {
+          (videoTrack as any).requestFrame();
+        } catch {}
+      }
 
       if (currentFrame >= totalFrames) {
         clearInterval(interval);

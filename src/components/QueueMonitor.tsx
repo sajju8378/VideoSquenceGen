@@ -842,7 +842,9 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
                         src={resolveClipUrl(scene.output_path)}
                         controls
                         autoPlay
+                        muted
                         loop
+                        playsInline
                         className="w-full h-full object-contain"
                       />
                     </div>
