@@ -21,8 +21,14 @@ function htmlPlugin(): Plugin {
     name: 'html-transform',
     transformIndexHtml: {
       order: 'pre',
-      handler(html) {
-        return html.replace('./assets/app-v3.js', '/src/main.tsx');
+      handler(html, ctx) {
+        if (ctx.server) {
+          // In dev mode, replace production bundles with dev entrypoint
+          return html
+            .replace('./assets/app-v3.js', '/src/main.tsx')
+            .replace('<link rel="stylesheet" crossorigin href="./assets/app-v3.css">', '');
+        }
+        return html;
       },
     },
   };
