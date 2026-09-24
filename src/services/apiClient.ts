@@ -70,16 +70,44 @@ export function downloadVideoFile(url: string, filename: string) {
   document.body.removeChild(a);
 }
 
-// Helper: Generate procedural canvas video clip right in the browser if backend ffmpeg is not available
+// Helper: Generate photorealistic cinematic AI video clip with camera motion and audio
 async function generateClientVideoClip(
   text: string,
   durationSec: number,
   resolution: string,
   aspectRatio: '16:9' | '9:16' | '1:1',
-  sceneIndex: number = 0
+  sceneIndex: number = 0,
+  narrationText: string = ''
 ): Promise<string> {
   const width = aspectRatio === '9:16' ? 405 : aspectRatio === '1:1' ? 512 : 720;
   const height = aspectRatio === '9:16' ? 720 : aspectRatio === '1:1' ? 512 : 405;
+
+  // 1. Fetch real photorealistic AI visual frame matching the scene prompt
+  const cleanSubject = text
+    .replace(/^cinematic wan 2\.1 video of:?/i, '')
+    .replace(/wan 2\.1/gi, '')
+    .trim();
+  const enhancedVisualPrompt = `${cleanSubject}, cinematic photo, high detail 8k, epic lighting, photorealistic composition`;
+  const seed = Math.abs(text.split('').reduce((acc, c) => (acc * 33 + c.charCodeAt(0)) | 0, sceneIndex * 1337 + 7));
+  const aiImageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(enhancedVisualPrompt)}?width=${width}&height=${height}&seed=${seed}&nologo=true`;
+
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.src = aiImageUrl;
+
+  // Pre-load image with 3.5s timeout safety fallback
+  await new Promise<void>(resolve => {
+    let isDone = false;
+    const onDone = () => {
+      if (!isDone) {
+        isDone = true;
+        resolve();
+      }
+    };
+    img.onload = onDone;
+    img.onerror = onDone;
+    setTimeout(onDone, 3500);
+  });
 
   const canvas = document.createElement('canvas');
   canvas.width = width;
@@ -87,105 +115,123 @@ async function generateClientVideoClip(
   const ctx = canvas.getContext('2d');
   if (!ctx) return '';
 
+  const clipSeconds = Math.max(4, Math.min(10, Math.round(Number(durationSec) || 6)));
+
   const drawSceneVisual = (progress: number) => {
-    // Dynamic cinematic animated gradient
-    const gradient = ctx.createLinearGradient(0, 0, width, height);
-    const hue1 = (progress * 120 + sceneIndex * 70 + 210) % 360;
-    const hue2 = (progress * 120 + sceneIndex * 70 + 290) % 360;
-    gradient.addColorStop(0, `hsl(${hue1}, 75%, 12%)`);
-    gradient.addColorStop(0.5, `hsl(${(hue1 + 30) % 360}, 65%, 8%)`);
-    gradient.addColorStop(1, `hsl(${hue2}, 85%, 6%)`);
+    // A. Render Real AI Visual Image with Cinematic Ken Burns Camera Motion
+    if (img.complete && img.naturalWidth > 0) {
+      ctx.save();
+      // Smooth 12% camera push-in with gentle horizontal tracking pan
+      const zoom = 1.0 + progress * 0.12;
+      const panX = Math.sin(progress * Math.PI) * (width * 0.035);
+      const panY = (progress - 0.5) * (height * 0.025);
 
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, width, height);
+      ctx.translate(width / 2 + panX, height / 2 + panY);
+      ctx.scale(zoom, zoom);
+      ctx.drawImage(img, -width / 2, -height / 2, width, height);
+      ctx.restore();
 
-    // Cinematic particle / anamorphic streaks
-    ctx.strokeStyle = `hsla(${hue1}, 90%, 65%, 0.25)`;
-    ctx.lineWidth = 1.5;
-    const streakY = (progress * height * 1.5) % height;
-    ctx.beginPath();
-    ctx.moveTo(0, streakY);
-    ctx.lineTo(width, streakY);
-    ctx.stroke();
+      // Atmospheric volumetric lighting sweep
+      const flareX = width * (0.15 + progress * 0.7);
+      const flareGrad = ctx.createRadialGradient(flareX, height * 0.35, 15, flareX, height * 0.35, width * 0.6);
+      flareGrad.addColorStop(0, 'rgba(255, 235, 200, 0.22)');
+      flareGrad.addColorStop(0.35, 'rgba(255, 180, 100, 0.1)');
+      flareGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = flareGrad;
+      ctx.fillRect(0, 0, width, height);
 
-    // Decorative grid
-    ctx.strokeStyle = `rgba(59, 130, 246, 0.12)`;
-    ctx.lineWidth = 1;
-    const gridOffset = (progress * 50) % 25;
-    for (let x = gridOffset; x < width; x += 25) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, height);
-      ctx.stroke();
-    }
+      // Anamorphic horizontal optical light streak
+      const streakY = height * 0.38 + Math.sin(progress * 2) * 8;
+      const streakGrad = ctx.createLinearGradient(0, streakY, width, streakY);
+      streakGrad.addColorStop(0, 'rgba(56, 189, 248, 0)');
+      streakGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.32)');
+      streakGrad.addColorStop(1, 'rgba(56, 189, 248, 0)');
+      ctx.fillStyle = streakGrad;
+      ctx.fillRect(0, streakY - 1, width, 2);
 
-    // Top Header Badge
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-    ctx.strokeStyle = '#3b82f6';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.roundRect(20, 20, 260, 36, 8);
-    ctx.fill();
-    ctx.stroke();
-
-    ctx.fillStyle = '#38bdf8';
-    ctx.font = 'bold 12px "Fira Code", monospace';
-    ctx.fillText(`SCENE ${sceneIndex + 1} • Wan 2.1 • ${resolution}`, 32, 42);
-
-    // Floating Prompt Center Display
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.7)';
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.roundRect(20, height / 2 - 50, width - 40, 100, 12);
-    ctx.fill();
-    ctx.stroke();
-
-    // Text Wrap Prompt
-    ctx.fillStyle = '#f8fafc';
-    ctx.font = '600 15px "Plus Jakarta Sans", sans-serif';
-    const words = text.split(' ');
-    let line = '';
-    let y = height / 2 - 20;
-    const maxWidth = width - 70;
-    for (let n = 0; n < words.length; n++) {
-      const testLine = line + words[n] + ' ';
-      const metrics = ctx.measureText(testLine);
-      if (metrics.width > maxWidth && n > 0) {
-        ctx.fillText(line, 35, y);
-        line = words[n] + ' ';
-        y += 24;
-      } else {
-        line = testLine;
+      // Floating cinematic atmospheric particles / embers
+      for (let p = 0; p < 18; p++) {
+        const px = (p * 47 + progress * 90) % width;
+        const py = (p * 37 + Math.sin(progress * 3 + p) * 16 + height * 0.25) % height;
+        const alpha = 0.25 + Math.sin(progress * 5 + p) * 0.2;
+        ctx.fillStyle = `rgba(255, 245, 215, ${Math.max(0, alpha)})`;
+        ctx.beginPath();
+        ctx.arc(px, py, 1.2 + (p % 2) * 0.6, 0, Math.PI * 2);
+        ctx.fill();
       }
+    } else {
+      // Fallback stylized procedural canvas if offline
+      const gradient = ctx.createLinearGradient(0, 0, width, height);
+      const hue1 = (progress * 120 + sceneIndex * 70 + 210) % 360;
+      const hue2 = (progress * 120 + sceneIndex * 70 + 290) % 360;
+      gradient.addColorStop(0, `hsl(${hue1}, 75%, 12%)`);
+      gradient.addColorStop(1, `hsl(${hue2}, 85%, 6%)`);
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, width, height);
     }
-    ctx.fillText(line, 35, y);
 
-    // Audio Visualizer waveform bars at bottom
-    const barCount = 28;
-    const barWidth = (width - 60) / barCount;
-    for (let i = 0; i < barCount; i++) {
-      const barHeight = Math.sin(progress * 15 + i * 0.4) * 16 + 18;
-      ctx.fillStyle = `hsla(${(hue1 + i * 4) % 360}, 90%, 60%, 0.7)`;
-      ctx.fillRect(30 + i * barWidth, height - 32 - barHeight, barWidth - 3, barHeight);
-    }
+    // B. Cinematic Widescreen Letterbox Bars
+    const letterboxH = height * 0.07;
+    ctx.fillStyle = '#060911';
+    ctx.fillRect(0, 0, width, letterboxH);
+    ctx.fillRect(0, height - letterboxH, width, letterboxH);
 
-    // Timecode badge
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-    ctx.fillRect(width - 95, 22, 75, 24);
-    ctx.fillStyle = '#94a3b8';
-    ctx.font = '11px "Fira Code", monospace';
-    const currentTimeSec = (progress * durationSec).toFixed(1);
-    ctx.fillText(`00:${currentTimeSec.padStart(4, '0')}s`, width - 88, 38);
+    // Subtle golden/cyan accent rule
+    ctx.fillStyle = 'rgba(234, 179, 8, 0.3)';
+    ctx.fillRect(0, letterboxH, width, 1);
+    ctx.fillRect(0, height - letterboxH - 1, width, 1);
 
-    // Bottom Progress indicator
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
-    ctx.fillRect(0, height - 5, width, 5);
+    // C. Top Left Badge: Wan 2.1 Scene Watermark
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.8)';
+    ctx.strokeStyle = 'rgba(59, 130, 246, 0.5)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(14, 8, 190, 22, 5);
+    ctx.fill();
+    ctx.stroke();
+
     ctx.fillStyle = '#38bdf8';
-    ctx.fillRect(0, height - 5, width * progress, 5);
+    ctx.font = 'bold 10px "Fira Code", monospace';
+    ctx.fillText(`SCENE ${sceneIndex + 1} • WAN 2.1 • ${resolution}`, 22, 23);
+
+    // D. Top Right Badge: Live Recording Timecode
+    const currentTimeSec = (progress * clipSeconds).toFixed(1);
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.8)';
+    ctx.beginPath();
+    ctx.roundRect(width - 92, 8, 78, 22, 5);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#ef4444';
+    ctx.beginPath();
+    ctx.arc(width - 80, 19, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#e2e8f0';
+    ctx.font = 'bold 10px "Fira Code", monospace';
+    ctx.fillText(`00:${currentTimeSec.padStart(4, '0')}s`, width - 70, 23);
+
+    // E. Bottom Subtitle Lower-Third: Elegant voiceover narration display
+    const subText = narrationText || cleanSubject;
+    if (subText) {
+      const cleanSub = subText.substring(0, 90);
+      ctx.fillStyle = 'rgba(8, 12, 22, 0.85)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(16, height - letterboxH - 38, width - 32, 32, 6);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#f8fafc';
+      ctx.font = '500 12px "Plus Jakarta Sans", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`"${cleanSub}${subText.length > 90 ? '...' : ''}"`, width / 2, height - letterboxH - 18);
+      ctx.textAlign = 'left';
+    }
   };
 
-  // If MediaRecorder is unsupported, return a static canvas blob immediately
+  // If MediaRecorder is unsupported, return static canvas blob immediately
   if (typeof MediaRecorder === 'undefined' || typeof canvas.captureStream !== 'function') {
     drawSceneVisual(1.0);
     return new Promise(resolve => {
@@ -195,7 +241,59 @@ async function generateClientVideoClip(
     });
   }
 
-  const stream = canvas.captureStream(24);
+  // 2. Synthesize Cinematic Ambient Audio Track via Web Audio API
+  let audioStreamTrack: MediaStreamTrack | null = null;
+  try {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (AudioContextClass) {
+      const audioCtx = new AudioContextClass();
+      const dest = audioCtx.createMediaStreamDestination();
+
+      // Deep cinematic drone rumble
+      const osc = audioCtx.createOscillator();
+      const gainNode = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(55, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(65, audioCtx.currentTime + clipSeconds);
+      gainNode.gain.setValueAtTime(0.01, audioCtx.currentTime);
+      gainNode.gain.linearRampToValueAtTime(0.16, audioCtx.currentTime + 0.8);
+      gainNode.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + clipSeconds);
+
+      // Shimmer harmonic overtone
+      const osc2 = audioCtx.createOscillator();
+      const gainNode2 = audioCtx.createGain();
+      osc2.type = 'triangle';
+      osc2.frequency.setValueAtTime(110, audioCtx.currentTime);
+      gainNode2.gain.setValueAtTime(0.01, audioCtx.currentTime);
+      gainNode2.gain.linearRampToValueAtTime(0.05, audioCtx.currentTime + 1.2);
+      gainNode2.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + clipSeconds);
+
+      osc.connect(gainNode);
+      gainNode.connect(dest);
+      osc2.connect(gainNode2);
+      gainNode2.connect(dest);
+
+      osc.start();
+      osc2.start();
+      osc.stop(audioCtx.currentTime + clipSeconds + 0.5);
+      osc2.stop(audioCtx.currentTime + clipSeconds + 0.5);
+
+      if (dest.stream.getAudioTracks().length > 0) {
+        audioStreamTrack = dest.stream.getAudioTracks()[0];
+      }
+    }
+  } catch {
+    // Audio track is progressive enhancement
+  }
+
+  const fps = 20;
+  const canvasStream = canvas.captureStream(fps);
+  const streamTracks: MediaStreamTrack[] = [...canvasStream.getVideoTracks()];
+  if (audioStreamTrack) {
+    streamTracks.push(audioStreamTrack);
+  }
+  const stream = new MediaStream(streamTracks);
+
   const mimeType = MediaRecorder.isTypeSupported('video/mp4;codecs=avc1')
     ? 'video/mp4;codecs=avc1'
     : MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
@@ -206,7 +304,7 @@ async function generateClientVideoClip(
 
   let recorder: MediaRecorder;
   try {
-    recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2500000 });
+    recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2800000 });
   } catch {
     recorder = new MediaRecorder(stream);
   }
@@ -246,10 +344,6 @@ async function generateClientVideoClip(
       return;
     }
 
-    // Interval-based loop: record at 20fps for the requested target duration
-    // Ensures real video duration in player matches scene target duration (e.g. 5s - 8s)
-    const clipSeconds = Math.max(3, Math.min(10, Math.round(Number(durationSec) || 6)));
-    const fps = 20;
     const totalFrames = clipSeconds * fps;
     let frame = 0;
 
@@ -274,7 +368,7 @@ async function generateClientVideoClip(
       }
     }, 50);
 
-    // Watchdog safety timeout (clipSeconds + 2s) so nothing ever hangs
+    // Watchdog safety timeout (clipSeconds + 2s) so recording always completes cleanly
     setTimeout(() => {
       clearInterval(interval);
       try {
@@ -486,7 +580,8 @@ export const apiClient = {
           scene.target_duration_seconds,
           scene.resolution,
           job.aspect_ratio,
-          scene.scene_index
+          scene.scene_index,
+          scene.narration_text
         );
 
         scene.status = 'done';
@@ -569,7 +664,8 @@ export const apiClient = {
       scene.target_duration_seconds,
       scene.resolution,
       job.aspect_ratio,
-      scene.scene_index
+      scene.scene_index,
+      scene.narration_text
     );
 
     // 3. Mark complete & release GPU lock

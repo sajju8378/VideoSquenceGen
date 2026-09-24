@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { dbService } from './db.ts';
@@ -146,27 +147,64 @@ async function renderClipWithFFmpeg(
   const width = resolution.includes('480') ? (is916 ? 480 : 854) : (is916 ? 720 : 1280);
   const height = resolution.includes('480') ? (is916 ? 854 : 480) : (is916 ? 1280 : 720);
 
-  // Generate dynamic gradient colors based on prompt hash and scene index
-  const hash = visualPrompt.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0) + sceneIndex * 42;
-  const hue1 = (hash * 13) % 360;
-  const hue2 = (hue1 + 75) % 360;
-
   // Clean prompt text for ffmpeg drawtext
-  const cleanPrompt = visualPrompt
+  const cleanSubject = visualPrompt
+    .replace(/^cinematic wan 2\.1 video of:?/i, '')
+    .replace(/wan 2\.1/gi, '')
     .replace(/['"\\:]/g, ' ')
-    .substring(0, 110)
+    .substring(0, 120)
     .trim();
 
   const titleText = `SCENE ${sceneIndex + 1} • WAN 2.1 [${resolution}]`;
 
-  // ffmpeg synthetic video generation filter
-  // Generates smooth animated test pattern/gradient + title text + prompt overlay
+  // Fetch real photorealistic AI visual image for this scene
+  const hash = visualPrompt.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0) + sceneIndex * 42;
+  const enhancedPrompt = `${cleanSubject}, cinematic photo, high detail 8k, photorealistic volumetric lighting, epic composition`;
+  const imgUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(enhancedPrompt)}?width=${width}&height=${height}&seed=${hash}&nologo=true`;
+  const tempImgPath = path.join(os.tmpdir(), `scene_ai_${sceneIndex}_${hash}.jpg`);
+
+  let hasImage = false;
+  try {
+    const res = await fetch(imgUrl, { signal: AbortSignal.timeout(4000) });
+    if (res.ok) {
+      const buffer = Buffer.from(await res.arrayBuffer());
+      await fs.promises.writeFile(tempImgPath, buffer);
+      hasImage = true;
+    }
+  } catch {
+    hasImage = false;
+  }
+
+  try {
+    if (hasImage) {
+      const totalFrames = Math.max(72, Math.round(durationSeconds * 24));
+      // Render camera motion using ffmpeg zoompan filter with letterbox and subtitles
+      await execFileAsync('/usr/bin/ffmpeg', [
+        '-y',
+        '-loop', '1',
+        '-i', tempImgPath,
+        '-vf', `scale=${Math.round(width * 1.15)}:${Math.round(height * 1.15)},zoompan=z='min(zoom+0.0012,1.15)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${totalFrames}:s=${width}x${height},drawtext=text='${titleText}':x=40:y=30:fontsize=22:fontcolor=white:box=1:boxcolor=black@0.65:boxborderw=6,drawtext=text='${cleanSubject.substring(0, 80)}':x=(w-text_w)/2:y=h-55:fontsize=18:fontcolor=white:box=1:boxcolor=black@0.75:boxborderw=6,format=yuv420p`,
+        '-c:v', 'libx264',
+        '-preset', 'ultrafast',
+        '-t', durationSeconds.toFixed(2),
+        outputPath,
+      ]);
+      await fs.promises.unlink(tempImgPath).catch(() => {});
+      return;
+    }
+  } catch (err: any) {
+    console.warn('[FFmpeg] AI image zoompan render warning:', err.message);
+    await fs.promises.unlink(tempImgPath).catch(() => {});
+  }
+
+  // Fallback synthetic pattern if image fetch failed
+  const hue1 = (hash * 13) % 360;
   const filterString = [
     `testsrc=size=${width}x${height}:rate=24:duration=${durationSeconds.toFixed(2)}`,
     `hue=h='${hue1}+t*8':s=1.8`,
     `drawbox=x=0:y=0:w=iw:h=ih:color=black@0.45:t=fill`,
     `drawtext=text='${titleText}':x=40:y=40:fontsize=28:fontcolor=white:box=1:boxcolor=black@0.6:boxborderw=8`,
-    `drawtext=text='${cleanPrompt}':x=40:y=h-90:fontsize=20:fontcolor=yellow:box=1:boxcolor=black@0.7:boxborderw=6`
+    `drawtext=text='${cleanSubject.substring(0, 90)}':x=40:y=h-90:fontsize=20:fontcolor=yellow:box=1:boxcolor=black@0.7:boxborderw=6`
   ].join(',');
 
   try {
@@ -180,8 +218,7 @@ async function renderClipWithFFmpeg(
       '-t', durationSeconds.toFixed(2),
       outputPath,
     ]);
-  } catch (err: any) {
-    // Fallback simple color block if complex filter failed
+  } catch {
     await execFileAsync('/usr/bin/ffmpeg', [
       '-y',
       '-f', 'lavfi',

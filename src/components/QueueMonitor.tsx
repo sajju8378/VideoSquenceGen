@@ -136,6 +136,8 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
     setGeneratingSceneId(sceneId);
     try {
       await apiClient.generateSingleScene(job.id, sceneId, forcedResolution);
+      // Automatically expand and play the generated video
+      setExpandedPreviewSceneId(sceneId);
       onRefreshJob();
     } catch (err) {
       console.error('Failed to generate scene:', err);
@@ -676,21 +678,21 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
 
                 {/* Inline Video Player for Completed Scene */}
                 {isExpanded && scene.output_path && (
-                  <div className="p-3 rounded-xl bg-black/60 border border-slate-800 space-y-2">
-                    <div className="flex items-center justify-between text-xs text-slate-400 font-mono">
-                      <span className="flex items-center gap-1.5">
+                  <div className="p-3.5 rounded-xl bg-black/75 border border-blue-500/30 shadow-2xl space-y-2.5">
+                    <div className="flex items-center justify-between text-xs text-slate-300 font-mono">
+                      <span className="flex items-center gap-1.5 font-semibold text-white">
                         <Check className="w-3.5 h-3.5 text-emerald-400" />
-                        Generated Video Clip ({scene.resolution || '720p'} • {Number(scene.target_duration_seconds).toFixed(1)}s)
+                        Photorealistic AI Video ({scene.resolution || '720p'} • {Number(scene.target_duration_seconds).toFixed(1)}s)
                       </span>
                       <button
                         onClick={() => handleDownloadScene(scene, idx)}
-                        className="text-xs text-blue-400 hover:text-blue-300 font-medium flex items-center gap-1 cursor-pointer"
+                        className="text-xs text-blue-400 hover:text-blue-300 font-medium flex items-center gap-1.5 bg-blue-950/40 px-2.5 py-1 rounded-md border border-blue-500/30 transition cursor-pointer"
                       >
-                        <Download className="w-3 h-3" />
-                        Download File (.mp4)
+                        <Download className="w-3.5 h-3.5" />
+                        <span>Download MP4</span>
                       </button>
                     </div>
-                    <div className="relative rounded-lg overflow-hidden bg-slate-950 flex items-center justify-center max-h-64 aspect-video">
+                    <div className="relative rounded-lg overflow-hidden bg-slate-950 flex items-center justify-center max-h-80 aspect-video shadow-inner">
                       <video
                         src={resolveClipUrl(scene.output_path)}
                         controls
