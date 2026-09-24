@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import type { Job, Scene } from '../types.ts';
 import { apiClient, downloadVideoFile } from '../services/apiClient.ts';
+import { HFOngoingProcessSection } from './HFOngoingProcessSection.tsx';
 
 interface QueueMonitorProps {
   job: Job;
@@ -831,9 +832,18 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
                   </div>
                 </div>
 
+                {/* Real-time Hugging Face Ongoing Process Section while Generating */}
+                {scene.status === 'generating' && (
+                  <HFOngoingProcessSection
+                    scene={scene}
+                    job={job}
+                    isGenerating={true}
+                  />
+                )}
+
                 {/* Inline Video Player for Completed Scene */}
                 {isExpanded && scene.output_path && (
-                  <div className="p-3.5 rounded-xl bg-black/75 border border-blue-500/30 shadow-2xl space-y-2.5">
+                  <div className="p-3.5 rounded-xl bg-black/75 border border-blue-500/30 shadow-2xl space-y-3.5">
                     <div className="flex items-center justify-between text-xs text-slate-300 font-mono">
                       <span className="flex items-center gap-1.5 font-semibold text-white">
                         <Check className="w-3.5 h-3.5 text-emerald-400" />
@@ -856,6 +866,15 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
                         loop
                         playsInline
                         className="w-full h-full object-contain"
+                      />
+                    </div>
+
+                    {/* Hugging Face Ongoing Process & Token Details Panel under Video Player */}
+                    <div className="pt-2 border-t border-slate-800">
+                      <HFOngoingProcessSection
+                        scene={scene}
+                        job={job}
+                        isGenerating={false}
                       />
                     </div>
                   </div>

@@ -2,6 +2,16 @@ export type SceneStatus = 'pending' | 'generating' | 'waiting_quota' | 'done' | 
 export type JobStatus = 'draft' | 'queued' | 'processing' | 'paused' | 'completed' | 'failed';
 export type VideoGenerationMode = 'prompt' | 'image_upload' | 'inbuilt_image';
 
+export interface SceneGenerationProgress {
+  stage: 'token_check' | 'image_submitted' | 'wan_diffusing' | 'encoding_mp4' | 'complete';
+  stage_text: string;
+  percent: number;
+  token_used?: string;
+  model_name?: string;
+  image_submitted_url?: string;
+  logs?: string[];
+}
+
 export interface Scene {
   id: string;
   job_id: string;
@@ -16,6 +26,7 @@ export interface Scene {
   audio_path: string | null;
   resolution: string;
   image_url?: string | null;
+  generation_progress?: SceneGenerationProgress;
   created_at: string;
   updated_at: string;
 }
