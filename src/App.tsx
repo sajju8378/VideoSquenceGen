@@ -150,22 +150,19 @@ export default function App() {
               }`}
             >
               <Layers className="w-4 h-4" />
-              <span>🎬 Storyboard & Multi-Scene</span>
+              <span>🎬 Storyboard & Video Sequence</span>
             </button>
 
             <button
               onClick={() => setActiveTab('queue')}
-              disabled={!activeJobId}
               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition border cursor-pointer ${
                 activeTab === 'queue'
                   ? 'bg-blue-600 text-white border-blue-500 shadow-md shadow-blue-500/20'
-                  : !activeJobId
-                  ? 'bg-slate-900/40 text-slate-600 border-slate-900 cursor-not-allowed'
                   : 'bg-slate-900/80 text-slate-400 border-slate-800 hover:bg-slate-800 hover:text-slate-200'
               }`}
             >
               <Activity className="w-4 h-4" />
-              <span>Queue & Progress</span>
+              <span>▶ Video Sequence Queue</span>
               {currentJob?.status === 'processing' && (
                 <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
               )}
@@ -173,12 +170,9 @@ export default function App() {
 
             <button
               onClick={() => setActiveTab('cinema')}
-              disabled={!activeJobId}
               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition border cursor-pointer ${
                 activeTab === 'cinema'
                   ? 'bg-blue-600 text-white border-blue-500 shadow-md shadow-blue-500/20'
-                  : !activeJobId
-                  ? 'bg-slate-900/40 text-slate-600 border-slate-900 cursor-not-allowed'
                   : 'bg-slate-900/80 text-slate-400 border-slate-800 hover:bg-slate-800 hover:text-slate-200'
               }`}
             >
@@ -222,7 +216,7 @@ export default function App() {
 
         {/* Tab 0: Instant LTX Video Generator */}
         {activeTab === 'ltx' && (
-          <LTXVideoGenerator />
+          <LTXVideoGenerator onNavigateTab={tab => setActiveTab(tab)} />
         )}
 
         {/* Tab 1: Script & Storyboard Studio */}
@@ -231,26 +225,75 @@ export default function App() {
         )}
 
         {/* Tab 2: Queue Monitor & Resilience Lab */}
-        {activeTab === 'queue' && currentJob && (
-          <QueueMonitor
-            job={currentJob}
-            onRefreshJob={fetchActiveJob}
-            onSelectScenePreview={scene => {
-              setSelectedPreviewScene(scene);
-              setActiveTab('cinema');
-            }}
-          />
+        {activeTab === 'queue' && (
+          currentJob ? (
+            <QueueMonitor
+              job={currentJob}
+              onRefreshJob={fetchActiveJob}
+              onSelectScenePreview={scene => {
+                setSelectedPreviewScene(scene);
+                setActiveTab('cinema');
+              }}
+            />
+          ) : (
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-8 md:p-12 shadow-xl backdrop-blur-sm text-center max-w-2xl mx-auto space-y-4">
+              <div className="w-16 h-16 rounded-2xl bg-blue-600/10 border border-blue-500/20 text-blue-400 mx-auto flex items-center justify-center">
+                <Activity className="w-8 h-8" />
+              </div>
+              <h2 className="text-xl font-bold text-white">Video Sequence Queue</h2>
+              <p className="text-sm text-slate-300 leading-relaxed">
+                No video sequence project is currently loaded in the queue. You can generate a new video sequence from your narrative script or storyboard.
+              </p>
+              <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
+                <button
+                  onClick={() => setActiveTab('script')}
+                  className="px-6 py-3 rounded-xl font-bold text-xs text-white bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-indigo-500 shadow-lg shadow-indigo-600/25 flex items-center gap-2 cursor-pointer transition"
+                >
+                  <Layers className="w-4 h-4" />
+                  <span>🎬 Open Video Sequence Studio</span>
+                </button>
+                <button
+                  onClick={() => setActiveTab('ltx')}
+                  className="px-5 py-3 rounded-xl font-medium text-xs text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-750 border border-slate-700 flex items-center gap-2 cursor-pointer transition"
+                >
+                  <Zap className="w-4 h-4 text-amber-300" />
+                  <span>⚡ Instant LTX Single Video</span>
+                </button>
+              </div>
+            </div>
+          )
         )}
 
         {/* Tab 3: Cinema Viewer & Assembly */}
-        {activeTab === 'cinema' && currentJob && (
-          <CinemaViewer
-            job={currentJob}
-            selectedPreviewScene={selectedPreviewScene}
-            onClearPreviewScene={() => setSelectedPreviewScene(null)}
-            onRefreshJob={fetchActiveJob}
-            onSelectScenePreview={setSelectedPreviewScene}
-          />
+        {activeTab === 'cinema' && (
+          currentJob ? (
+            <CinemaViewer
+              job={currentJob}
+              selectedPreviewScene={selectedPreviewScene}
+              onClearPreviewScene={() => setSelectedPreviewScene(null)}
+              onRefreshJob={fetchActiveJob}
+              onSelectScenePreview={setSelectedPreviewScene}
+            />
+          ) : (
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-8 md:p-12 shadow-xl backdrop-blur-sm text-center max-w-2xl mx-auto space-y-4">
+              <div className="w-16 h-16 rounded-2xl bg-indigo-600/10 border border-indigo-500/20 text-indigo-400 mx-auto flex items-center justify-center">
+                <Film className="w-8 h-8" />
+              </div>
+              <h2 className="text-xl font-bold text-white">Cinema & Assembly Studio</h2>
+              <p className="text-sm text-slate-300 leading-relaxed">
+                Generate video scenes in the sequence queue first. Once your scene videos are ready, you can preview clips, assemble audio narration, and export the finished master film here.
+              </p>
+              <div className="pt-2 flex justify-center">
+                <button
+                  onClick={() => setActiveTab('script')}
+                  className="px-6 py-3 rounded-xl font-bold text-xs text-white bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-600/25 flex items-center gap-2 cursor-pointer transition"
+                >
+                  <Layers className="w-4 h-4" />
+                  <span>🎬 Start a Video Sequence Project</span>
+                </button>
+              </div>
+            </div>
+          )
         )}
       </main>
 

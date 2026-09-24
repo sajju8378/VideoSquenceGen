@@ -19,7 +19,8 @@ import {
   UserCheck,
   X,
   Eye,
-  Check
+  Check,
+  Play
 } from 'lucide-react';
 import { SCRIPT_PRESETS, ScriptPreset } from '../presets.ts';
 import type { SplitSceneResult, VideoGenerationMode } from '../types.ts';
@@ -378,6 +379,74 @@ export const ScriptSplitter: React.FC<ScriptSplitterProps> = ({ onJobCreated }) 
     }
   };
 
+  // Direct 1-Click Generate Video Sequence: auto-splits if not split, creates job, and navigates to sequence queue
+  const handleGenerateVideoSequence = async () => {
+    if (!scriptText.trim()) {
+      setSplitError('Please enter a script before generating video sequence.');
+      return;
+    }
+
+    setSplitError(null);
+    let scenesToUse = scenes;
+
+    // If scenes are not split yet, auto-split them with Gemini first!
+    if (scenesToUse.length === 0) {
+      setIsSplitting(true);
+      try {
+        const data = await apiClient.splitScript(scriptText, {
+          targetDuration,
+          genreStyle,
+          aspectRatio,
+          characterAnchor: characterAnchor.enforceConsistency ? characterAnchor.description : undefined,
+        });
+
+        if (data.title && !projectTitle) {
+          setProjectTitle(data.title);
+        }
+        scenesToUse = (data.scenes || []).map(s => ({
+          ...s,
+          image_url: characterAnchor.imageUrl || undefined,
+          image_source: characterAnchor.imageUrl ? 'character_anchor' : 'none',
+        }));
+        setScenes(scenesToUse);
+      } catch (err: any) {
+        setSplitError(err.message || 'Error splitting script into scenes');
+        setIsSplitting(false);
+        return;
+      } finally {
+        setIsSplitting(false);
+      }
+    }
+
+    if (scenesToUse.length === 0) {
+      setSplitError('Unable to generate scenes from script. Please try editing your script text.');
+      return;
+    }
+
+    setIsCreatingJob(true);
+    try {
+      const job = await apiClient.createJob({
+        title: projectTitle || 'Untitled Project',
+        script: scriptText,
+        targetResolution: resolution,
+        aspectRatio,
+        scenes: scenesToUse,
+        generationMode,
+        characterAnchorImage: characterAnchor.imageUrl || null,
+        characterAnchorPrompt: characterAnchor.description || null,
+        simulation: {
+          acceleratedSpeed: true,
+        },
+      });
+
+      onJobCreated(job.id);
+    } catch (err: any) {
+      setSplitError(err.message || 'Failed to create video sequence job');
+    } finally {
+      setIsCreatingJob(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* 1. Script Configuration Card */}
@@ -515,31 +584,70 @@ export const ScriptSplitter: React.FC<ScriptSplitterProps> = ({ onJobCreated }) 
             </div>
           </div>
 
-          {/* Split Action Button */}
+          {/* Primary Sequence & Split Action Buttons */}
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
             <div className="text-xs text-slate-400 flex items-center gap-1.5">
               <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
               <span>Uses Gemini 3.8 Flash structured scene breakdown</span>
             </div>
 
-            <button
-              type="button"
-              onClick={handleSplitScript}
-              disabled={isSplitting}
-              className="w-full sm:w-auto px-5 py-2.5 rounded-xl font-semibold text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-blue-600/25 transition cursor-pointer"
-            >
-              {isSplitting ? (
-                <>
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                  <span>Splitting Scenes with Gemini...</span>
-                </>
-              ) : (
-                <>
-                  <Wand2 className="w-4 h-4" />
-                  <span>Split Script into Scenes</span>
-                </>
-              )}
-            </button>
+            <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
+              {/* 1-Click Generate Video Sequence Button */}
+              <button
+                type="button"
+                onClick={handleGenerateVideoSequence}
+                disabled={isSplitting || isCreatingJob}
+                className="w-full sm:w-auto px-6 py-2.5 rounded-xl font-bold text-xs text-white bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:via-indigo-500 hover:to-purple-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/30 transition cursor-pointer"
+                title="Direct 1-Click: auto-splits into cinematic scenes and begins Video Sequence generation"
+              >
+                {isCreatingJob ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                    <span>Starting Video Sequence...</span>
+                  </>
+                ) : isSplitting ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                    <span>Splitting Script into Scenes...</span>
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-4 h-4 fill-white text-white" />
+                    <span>🎬 Generate Video Sequence</span>
+                    {scenes.length > 0 ? (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/20 font-mono">
+                        {scenes.length} Scenes
+                      </span>
+                    ) : (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/20">
+                        Auto-Split & Run
+                      </span>
+                    )}
+                  </>
+                )}
+              </button>
+
+              {/* Secondary Split Button for editing */}
+              <button
+                type="button"
+                onClick={handleSplitScript}
+                disabled={isSplitting || isCreatingJob}
+                className="w-full sm:w-auto px-4 py-2.5 rounded-xl font-semibold text-xs text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-750 disabled:opacity-50 disabled:cursor-not-allowed border border-slate-700 flex items-center justify-center gap-2 transition cursor-pointer"
+                title="Split script to review and customize scene prompts before generating"
+              >
+                {isSplitting ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Splitting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Wand2 className="w-3.5 h-3.5 text-blue-400" />
+                    <span>Review / Edit Scenes First</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
 
           {splitError && (
@@ -1109,16 +1217,17 @@ export const ScriptSplitter: React.FC<ScriptSplitterProps> = ({ onJobCreated }) 
             <button
               onClick={handleCreateJob}
               disabled={isCreatingJob}
-              className="w-full sm:w-auto px-6 py-3 rounded-xl font-bold text-xs text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25 transition cursor-pointer"
+              className="w-full sm:w-auto px-6 py-3 rounded-xl font-bold text-xs text-white bg-gradient-to-r from-emerald-600 via-teal-600 to-blue-600 hover:from-emerald-500 hover:via-teal-500 hover:to-blue-500 disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25 transition cursor-pointer"
             >
               {isCreatingJob ? (
                 <>
                   <RefreshCw className="w-4 h-4 animate-spin" />
-                  <span>Initializing Video Pipeline...</span>
+                  <span>Initializing Video Sequence Pipeline...</span>
                 </>
               ) : (
                 <>
-                  <span>Proceed to Video Generation</span>
+                  <Play className="w-4 h-4 fill-white" />
+                  <span>🎬 Generate Video Sequence ({scenes.length} Scenes)</span>
                   <ArrowRight className="w-4 h-4" />
                 </>
               )}

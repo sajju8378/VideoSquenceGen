@@ -465,32 +465,42 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
             {/* If next pending scene exists and no countdown or generation active */}
             {!isGpuBusy && countdown === null && nextPendingScene && (
               <>
+                {/* 1. PRIMARY: Generate Entire Video Sequence */}
                 <button
-                  onClick={() => handleGenerateSingle(nextPendingScene.id)}
-                  className="px-5 py-2.5 rounded-xl font-bold text-xs text-white bg-blue-600 hover:bg-blue-500 flex items-center gap-2 shadow-xl shadow-blue-600/30 transition cursor-pointer"
+                  onClick={handleStartQueue}
+                  disabled={isStartingQueue || isGpuBusy}
+                  className="px-5 py-2.5 rounded-xl font-bold text-xs text-white bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:via-indigo-500 hover:to-purple-500 flex items-center gap-2 shadow-xl shadow-indigo-600/30 transition cursor-pointer"
+                  title="Generate all remaining scenes sequentially with ZeroGPU queue management"
                 >
-                  {nextPendingScene.scene_index === 0 ? (
+                  {isStartingQueue ? (
                     <>
-                      <Play className="w-4 h-4 fill-white" />
-                      <span>Generate Video 1 Now</span>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Starting Sequence...</span>
                     </>
                   ) : (
                     <>
-                      <ArrowRight className="w-4 h-4" />
-                      <span>Proceed to Generate Video {nextPendingScene.scene_index + 1}</span>
+                      <Play className="w-4 h-4 fill-white" />
+                      <span>🎬 Generate Video Sequence (All {scenes.length} Scenes)</span>
                     </>
                   )}
                 </button>
 
-                {/* Batch Sequential Queue Option */}
+                {/* 2. Step-by-Step Single Scene Option */}
                 <button
-                  onClick={handleStartQueue}
-                  disabled={isStartingQueue}
-                  className="px-4 py-2.5 rounded-xl font-medium text-xs text-slate-300 bg-slate-800 hover:bg-slate-750 hover:text-white disabled:opacity-50 border border-slate-700 flex items-center gap-2 transition cursor-pointer"
-                  title="Process all remaining scenes sequentially with GPU cleanup"
+                  onClick={() => handleGenerateSingle(nextPendingScene.id)}
+                  className="px-4 py-2.5 rounded-xl font-medium text-xs text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-750 border border-slate-700 flex items-center gap-2 transition cursor-pointer"
                 >
-                  <Play className="w-3.5 h-3.5 text-slate-400" />
-                  <span>Run All Sequentially</span>
+                  {nextPendingScene.scene_index === 0 ? (
+                    <>
+                      <Film className="w-3.5 h-3.5 text-blue-400" />
+                      <span>Generate Video 1 Only</span>
+                    </>
+                  ) : (
+                    <>
+                      <ArrowRight className="w-3.5 h-3.5 text-blue-400" />
+                      <span>Generate Video {nextPendingScene.scene_index + 1} Only</span>
+                    </>
+                  )}
                 </button>
               </>
             )}
@@ -507,10 +517,10 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
                 </button>
                 <button
                   onClick={handleStartQueue}
-                  className="px-4 py-2.5 rounded-xl font-medium text-xs text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 flex items-center gap-2 transition cursor-pointer"
+                  className="px-4 py-2.5 rounded-xl font-medium text-xs text-indigo-300 hover:text-white bg-indigo-950/70 hover:bg-indigo-900 border border-indigo-700/50 flex items-center gap-2 transition cursor-pointer"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Regenerate Queue</span>
+                  <span>🎬 Re-Generate Video Sequence</span>
                 </button>
               </>
             )}

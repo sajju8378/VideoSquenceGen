@@ -49,7 +49,11 @@ const INSPIRATION_PROMPTS = [
   },
 ];
 
-export const LTXVideoGenerator: React.FC = () => {
+interface LTXVideoGeneratorProps {
+  onNavigateTab?: (tab: 'ltx' | 'script' | 'queue' | 'cinema') => void;
+}
+
+export const LTXVideoGenerator: React.FC<LTXVideoGeneratorProps> = ({ onNavigateTab }) => {
   const [prompt, setPrompt] = useState<string>(
     'Lord Hanuman soaring through golden sunset sky over deep ocean, holding glowing celestial Gada mace, divine aura with sweeping volumetric god rays'
   );
@@ -256,6 +260,20 @@ export const LTXVideoGenerator: React.FC = () => {
           <p className="text-sm text-slate-300 leading-relaxed">
             Enter any visual scene or story concept. The system runs real frame-by-frame generative motion with dynamic camera angles, cinematic volumetric lighting, and 24 FPS MP4 playback.
           </p>
+
+          <div className="pt-2 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => onNavigateTab?.('script')}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-indigo-500 shadow-md shadow-blue-500/20 border border-blue-400/40 cursor-pointer transition"
+            >
+              <Layers className="w-4 h-4 text-amber-300" />
+              <span>🎬 Generate Video Sequence (Multi-Scene Studio)</span>
+            </button>
+            <span className="text-xs text-slate-400">
+              For structured multi-scene scripts, consistent characters, and full storylines.
+            </span>
+          </div>
         </div>
       </div>
 
@@ -404,6 +422,16 @@ export const LTXVideoGenerator: React.FC = () => {
                   <span>Generate Video (LTX Engine)</span>
                 </>
               )}
+            </button>
+
+            {/* Direct Switch to Video Sequence Studio */}
+            <button
+              type="button"
+              onClick={() => onNavigateTab?.('script')}
+              className="w-full py-2.5 px-3 rounded-xl font-medium text-xs text-indigo-300 hover:text-white bg-indigo-950/40 hover:bg-indigo-900/60 border border-indigo-800/40 flex items-center justify-center gap-2 cursor-pointer transition shadow-sm"
+            >
+              <Layers className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Looking for full Multi-Scene Storyboard? <strong>Open Video Sequence Studio</strong> →</span>
             </button>
 
             {/* Progress Bar when generating */}
