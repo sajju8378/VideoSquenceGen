@@ -197,9 +197,9 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
         );
       case 'generating':
         return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/30 animate-pulse">
-            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-            <span>Generating Video (GPU Lock)</span>
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-blue-500/15 text-blue-300 border border-blue-500/40 animate-pulse">
+            <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-400" />
+            <span>Diffusing AI Video & Motion...</span>
           </span>
         );
       case 'waiting_quota':

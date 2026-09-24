@@ -70,6 +70,309 @@ export function downloadVideoFile(url: string, filename: string) {
   document.body.removeChild(a);
 }
 
+// In-memory cache for preloaded scene visual images
+const sceneImageCache = new Map<string, HTMLImageElement>();
+
+export function prefetchSceneVisual(
+  text: string,
+  aspectRatio: '16:9' | '9:16' | '1:1',
+  sceneIndex: number
+) {
+  const width = aspectRatio === '9:16' ? 405 : aspectRatio === '1:1' ? 512 : 720;
+  const height = aspectRatio === '9:16' ? 720 : aspectRatio === '1:1' ? 512 : 405;
+  const cleanSubject = text
+    .replace(/^cinematic wan 2\.1 video of:?/i, '')
+    .replace(/wan 2\.1/gi, '')
+    .trim();
+  const enhancedVisualPrompt = `${cleanSubject}, cinematic photo, high detail 8k, epic volumetric lighting, masterwork composition`;
+  const seed = Math.abs(text.split('').reduce((acc, c) => (acc * 33 + c.charCodeAt(0)) | 0, sceneIndex * 1337 + 7));
+  const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(enhancedVisualPrompt)}?width=${width}&height=${height}&seed=${seed}&nologo=true`;
+
+  const cacheKey = `${text}_${sceneIndex}_${aspectRatio}`;
+  if (!sceneImageCache.has(cacheKey)) {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.src = url;
+    sceneImageCache.set(cacheKey, img);
+  }
+}
+
+// Rich semantic animated cinematic painter if offline or while external diffusers synthesize
+function drawThematicCinematicIllustration(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  progress: number,
+  promptText: string
+) {
+  const lower = promptText.toLowerCase();
+  const isHanumanOrOceanOrFlying =
+    lower.includes('hanuman') ||
+    lower.includes('ocean') ||
+    lower.includes('sea') ||
+    lower.includes('fly') ||
+    lower.includes('sky') ||
+    lower.includes('water');
+
+  if (isHanumanOrOceanOrFlying) {
+    // 1. Epic Twilight / Storm Sky with volumetric light rays
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, height * 0.7);
+    skyGrad.addColorStop(0, '#060d1d');
+    skyGrad.addColorStop(0.35, '#0f2444');
+    skyGrad.addColorStop(0.65, '#2e2547');
+    skyGrad.addColorStop(0.85, '#853e2b');
+    skyGrad.addColorStop(1, '#e07a38');
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, width, height);
+
+    // Glowing Sun / Divine Horizon Source
+    const sunX = width * 0.72;
+    const sunY = height * 0.52;
+    const sunGrad = ctx.createRadialGradient(sunX, sunY, 5, sunX, sunY, width * 0.5);
+    sunGrad.addColorStop(0, 'rgba(255, 230, 160, 0.95)');
+    sunGrad.addColorStop(0.2, 'rgba(255, 140, 50, 0.55)');
+    sunGrad.addColorStop(0.5, 'rgba(200, 70, 30, 0.25)');
+    sunGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = sunGrad;
+    ctx.beginPath();
+    ctx.arc(sunX, sunY, width * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Volumetric God Rays radiating from sun
+    ctx.save();
+    ctx.translate(sunX, sunY);
+    for (let r = 0; r < 8; r++) {
+      const rayAngle = -Math.PI * 0.85 + r * 0.25 + Math.sin(progress * 1.5 + r) * 0.05;
+      ctx.rotate(rayAngle);
+      ctx.fillStyle = 'rgba(255, 235, 180, 0.07)';
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(-width * 0.9, -width * 0.15);
+      ctx.lineTo(-width * 0.9, width * 0.15);
+      ctx.closePath();
+      ctx.fill();
+      ctx.rotate(-rayAngle);
+    }
+    ctx.restore();
+
+    // Distant Lanka Golden Temple & Mountain silhouette on horizon
+    ctx.fillStyle = '#0b1325';
+    ctx.beginPath();
+    ctx.moveTo(width * 0.6, height * 0.58);
+    ctx.lineTo(width * 0.68, height * 0.48);
+    ctx.lineTo(width * 0.71, height * 0.42); // Temple spire
+    ctx.lineTo(width * 0.74, height * 0.5);
+    ctx.lineTo(width * 0.82, height * 0.45);
+    ctx.lineTo(width * 0.88, height * 0.52);
+    ctx.lineTo(width, height * 0.58);
+    ctx.lineTo(width, height * 0.65);
+    ctx.lineTo(width * 0.6, height * 0.65);
+    ctx.closePath();
+    ctx.fill();
+
+    // Temple lights / golden beacons on Lanka
+    ctx.fillStyle = 'rgba(255, 200, 50, 0.85)';
+    ctx.beginPath();
+    ctx.arc(width * 0.71, height * 0.43, 2.5, 0, Math.PI * 2);
+    ctx.arc(width * 0.76, height * 0.49, 1.8, 0, Math.PI * 2);
+    ctx.arc(width * 0.82, height * 0.46, 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 2. Multi-Layer Rolling Ocean Waves with dynamic foam
+    const waterHorizonY = height * 0.56;
+    ctx.fillStyle = '#0a1d37';
+    ctx.fillRect(0, waterHorizonY, width, height - waterHorizonY);
+
+    // Sun reflection trail on water
+    const reflectGrad = ctx.createLinearGradient(sunX - 60, waterHorizonY, sunX + 60, height);
+    reflectGrad.addColorStop(0, 'rgba(255, 200, 100, 0.6)');
+    reflectGrad.addColorStop(0.5, 'rgba(230, 120, 40, 0.3)');
+    reflectGrad.addColorStop(1, 'rgba(200, 80, 20, 0.1)');
+    ctx.fillStyle = reflectGrad;
+    ctx.fillRect(sunX - 70, waterHorizonY, 140, height - waterHorizonY);
+
+    // Mid-distance sinusoidal rolling waves
+    ctx.fillStyle = '#062040';
+    ctx.beginPath();
+    ctx.moveTo(0, waterHorizonY + 30);
+    for (let x = 0; x <= width; x += 15) {
+      const y = waterHorizonY + 30 + Math.sin(x * 0.025 + progress * 8) * 12 + Math.cos(x * 0.05 - progress * 4) * 6;
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(width, height);
+    ctx.lineTo(0, height);
+    ctx.closePath();
+    ctx.fill();
+
+    // Foreground deep waves with cresting whitecaps
+    ctx.fillStyle = '#031429';
+    ctx.beginPath();
+    ctx.moveTo(0, waterHorizonY + 80);
+    for (let x = 0; x <= width; x += 20) {
+      const y = waterHorizonY + 80 + Math.sin(x * 0.015 + progress * 6 + 1.2) * 22;
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(width, height);
+    ctx.lineTo(0, height);
+    ctx.closePath();
+    ctx.fill();
+
+    // White foam crests on foreground waves
+    ctx.strokeStyle = 'rgba(230, 245, 255, 0.45)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    for (let x = 0; x <= width; x += 25) {
+      const y = waterHorizonY + 80 + Math.sin(x * 0.015 + progress * 6 + 1.2) * 22;
+      if (Math.sin(x * 0.03 + progress * 4) > 0.1) {
+        ctx.moveTo(x - 12, y);
+        ctx.lineTo(x + 12, y);
+      }
+    }
+    ctx.stroke();
+
+    // 3. Majestic Soaring Figure (Hanuman flying forward across the sea)
+    const figureX = width * (0.28 + progress * 0.22);
+    const figureY = height * (0.34 + Math.sin(progress * 4) * 0.04);
+    const figureScale = 0.95 + progress * 0.2;
+
+    ctx.save();
+    ctx.translate(figureX, figureY);
+    ctx.scale(figureScale, figureScale);
+
+    // Radiant Golden Aura
+    const auraGrad = ctx.createRadialGradient(0, 0, 10, 0, 0, 95);
+    auraGrad.addColorStop(0, 'rgba(255, 220, 100, 0.65)');
+    auraGrad.addColorStop(0.35, 'rgba(255, 160, 40, 0.35)');
+    auraGrad.addColorStop(0.7, 'rgba(255, 100, 20, 0.12)');
+    auraGrad.addColorStop(1, 'rgba(255, 80, 0, 0)');
+    ctx.fillStyle = auraGrad;
+    ctx.beginPath();
+    ctx.arc(0, 0, 95, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Golden divine energy streak trailing behind flight
+    const trailGrad = ctx.createLinearGradient(0, 0, -140, 20);
+    trailGrad.addColorStop(0, 'rgba(255, 215, 0, 0.7)');
+    trailGrad.addColorStop(0.5, 'rgba(255, 130, 30, 0.3)');
+    trailGrad.addColorStop(1, 'rgba(255, 100, 0, 0)');
+    ctx.fillStyle = trailGrad;
+    ctx.beginPath();
+    ctx.moveTo(0, -10);
+    ctx.lineTo(-140, 15 + Math.sin(progress * 10) * 8);
+    ctx.lineTo(-110, 35);
+    ctx.lineTo(0, 15);
+    ctx.closePath();
+    ctx.fill();
+
+    // Billowing Red Royal Cape fluttering
+    ctx.fillStyle = '#dc2626';
+    ctx.beginPath();
+    ctx.moveTo(-10, 0);
+    ctx.quadraticCurveTo(-60, 10 + Math.sin(progress * 12) * 12, -110, 22 + Math.sin(progress * 15) * 16);
+    ctx.quadraticCurveTo(-70, 32 + Math.sin(progress * 12 + 1) * 10, -15, 18);
+    ctx.closePath();
+    ctx.fill();
+
+    // Muscular Hero Silhouette
+    ctx.fillStyle = '#1c1917';
+    ctx.beginPath();
+    ctx.ellipse(5, 5, 26, 16, Math.PI * 0.18, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Extended Forward Right Arm
+    ctx.lineWidth = 9;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#1c1917';
+    ctx.beginPath();
+    ctx.moveTo(18, 0);
+    ctx.lineTo(54, -14);
+    ctx.stroke();
+
+    // Golden Mace (Gada) in Hand
+    ctx.strokeStyle = '#f59e0b';
+    ctx.lineWidth = 4.5;
+    ctx.beginPath();
+    ctx.moveTo(38, -4);
+    ctx.lineTo(68, -28);
+    ctx.stroke();
+    // Mace head
+    ctx.fillStyle = '#d97706';
+    ctx.beginPath();
+    ctx.arc(68, -28, 9, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Head with Mukut (Golden Crown)
+    ctx.fillStyle = '#1c1917';
+    ctx.beginPath();
+    ctx.arc(24, -12, 11, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#fbbf24';
+    ctx.beginPath();
+    ctx.moveTo(20, -21);
+    ctx.lineTo(26, -33);
+    ctx.lineTo(31, -21);
+    ctx.closePath();
+    ctx.fill();
+
+    // Trailing powerful legs
+    ctx.lineWidth = 8;
+    ctx.strokeStyle = '#1c1917';
+    ctx.beginPath();
+    ctx.moveTo(-14, 10);
+    ctx.lineTo(-44, 26);
+    ctx.stroke();
+
+    // Glowing ornaments
+    ctx.fillStyle = '#fef08a';
+    ctx.beginPath();
+    ctx.arc(28, -8, 2.5, 0, Math.PI * 2);
+    ctx.arc(14, 2, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+
+    // Water spray droplets rising up
+    for (let s = 0; s < 25; s++) {
+      const sx = (s * 31 + progress * 140) % width;
+      const sy = waterHorizonY + 40 + ((s * 41) % (height - waterHorizonY - 60)) + Math.sin(progress * 6 + s) * 10;
+      ctx.fillStyle = `rgba(255, 255, 255, ${0.3 + (s % 3) * 0.2})`;
+      ctx.beginPath();
+      ctx.arc(sx, sy, 1.2 + (s % 2), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else {
+    // Cinematic atmospheric scenery
+    const sky = ctx.createLinearGradient(0, 0, 0, height);
+    sky.addColorStop(0, '#020617');
+    sky.addColorStop(0.5, '#0f172a');
+    sky.addColorStop(1, '#1e293b');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, width, height);
+
+    // Mountain silhouettes
+    ctx.fillStyle = '#090d16';
+    ctx.beginPath();
+    ctx.moveTo(0, height * 0.65);
+    ctx.lineTo(width * 0.3, height * 0.45);
+    ctx.lineTo(width * 0.6, height * 0.7);
+    ctx.lineTo(width * 0.85, height * 0.38);
+    ctx.lineTo(width, height * 0.65);
+    ctx.lineTo(width, height);
+    ctx.lineTo(0, height);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // Cinematic horizontal light streak
+  const streakY = height * 0.42;
+  const streak = ctx.createLinearGradient(0, streakY, width, streakY);
+  streak.addColorStop(0, 'rgba(255, 200, 100, 0)');
+  streak.addColorStop(0.5, 'rgba(255, 240, 200, 0.35)');
+  streak.addColorStop(1, 'rgba(255, 200, 100, 0)');
+  ctx.fillStyle = streak;
+  ctx.fillRect(0, streakY - 1, width, 2);
+}
+
 // Helper: Generate photorealistic cinematic AI video clip with camera motion and audio
 async function generateClientVideoClip(
   text: string,
@@ -82,32 +385,39 @@ async function generateClientVideoClip(
   const width = aspectRatio === '9:16' ? 405 : aspectRatio === '1:1' ? 512 : 720;
   const height = aspectRatio === '9:16' ? 720 : aspectRatio === '1:1' ? 512 : 405;
 
-  // 1. Fetch real photorealistic AI visual frame matching the scene prompt
   const cleanSubject = text
     .replace(/^cinematic wan 2\.1 video of:?/i, '')
     .replace(/wan 2\.1/gi, '')
     .trim();
-  const enhancedVisualPrompt = `${cleanSubject}, cinematic photo, high detail 8k, epic lighting, photorealistic composition`;
+  const enhancedVisualPrompt = `${cleanSubject}, cinematic photo, high detail 8k, epic volumetric lighting, masterwork composition`;
   const seed = Math.abs(text.split('').reduce((acc, c) => (acc * 33 + c.charCodeAt(0)) | 0, sceneIndex * 1337 + 7));
   const aiImageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(enhancedVisualPrompt)}?width=${width}&height=${height}&seed=${seed}&nologo=true`;
 
-  const img = new Image();
-  img.crossOrigin = 'anonymous';
-  img.src = aiImageUrl;
+  const cacheKey = `${text}_${sceneIndex}_${aspectRatio}`;
+  let img: HTMLImageElement;
 
-  // Pre-load image with 3.5s timeout safety fallback
-  await new Promise<void>(resolve => {
-    let isDone = false;
-    const onDone = () => {
-      if (!isDone) {
-        isDone = true;
-        resolve();
-      }
-    };
-    img.onload = onDone;
-    img.onerror = onDone;
-    setTimeout(onDone, 3500);
-  });
+  if (sceneImageCache.has(cacheKey) && sceneImageCache.get(cacheKey)!.complete && sceneImageCache.get(cacheKey)!.naturalWidth > 0) {
+    img = sceneImageCache.get(cacheKey)!;
+  } else {
+    img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.src = aiImageUrl;
+    sceneImageCache.set(cacheKey, img);
+
+    // Give Pollinations up to 16 seconds to synthesize the 8K AI frame
+    await new Promise<void>(resolve => {
+      let isDone = false;
+      const onDone = () => {
+        if (!isDone) {
+          isDone = true;
+          resolve();
+        }
+      };
+      img.onload = onDone;
+      img.onerror = onDone;
+      setTimeout(onDone, 16000);
+    });
+  }
 
   const canvas = document.createElement('canvas');
   canvas.width = width;
@@ -118,10 +428,9 @@ async function generateClientVideoClip(
   const clipSeconds = Math.max(4, Math.min(10, Math.round(Number(durationSec) || 6)));
 
   const drawSceneVisual = (progress: number) => {
-    // A. Render Real AI Visual Image with Cinematic Ken Burns Camera Motion
+    // 1. If AI Photorealistic Image Loaded Successfully: Smooth Ken Burns Motion
     if (img.complete && img.naturalWidth > 0) {
       ctx.save();
-      // Smooth 12% camera push-in with gentle horizontal tracking pan
       const zoom = 1.0 + progress * 0.12;
       const panX = Math.sin(progress * Math.PI) * (width * 0.035);
       const panY = (progress - 0.5) * (height * 0.025);
@@ -149,8 +458,8 @@ async function generateClientVideoClip(
       ctx.fillStyle = streakGrad;
       ctx.fillRect(0, streakY - 1, width, 2);
 
-      // Floating cinematic atmospheric particles / embers
-      for (let p = 0; p < 18; p++) {
+      // Floating cinematic atmospheric embers
+      for (let p = 0; p < 20; p++) {
         const px = (p * 47 + progress * 90) % width;
         const py = (p * 37 + Math.sin(progress * 3 + p) * 16 + height * 0.25) % height;
         const alpha = 0.25 + Math.sin(progress * 5 + p) * 0.2;
@@ -160,73 +469,37 @@ async function generateClientVideoClip(
         ctx.fill();
       }
     } else {
-      // Fallback stylized procedural canvas if offline
-      const gradient = ctx.createLinearGradient(0, 0, width, height);
-      const hue1 = (progress * 120 + sceneIndex * 70 + 210) % 360;
-      const hue2 = (progress * 120 + sceneIndex * 70 + 290) % 360;
-      gradient.addColorStop(0, `hsl(${hue1}, 75%, 12%)`);
-      gradient.addColorStop(1, `hsl(${hue2}, 85%, 6%)`);
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, width, height);
+      // 2. High-Fidelity Thematic Cinematic Animation (Soaring Hanuman, Waves, Lanka, Temple Lights)
+      drawThematicCinematicIllustration(ctx, width, height, progress, text);
     }
 
-    // B. Cinematic Widescreen Letterbox Bars
+    // 2. Cinematic Widescreen Letterbox Bars
     const letterboxH = height * 0.07;
-    ctx.fillStyle = '#060911';
+    ctx.fillStyle = '#05070d';
     ctx.fillRect(0, 0, width, letterboxH);
     ctx.fillRect(0, height - letterboxH, width, letterboxH);
 
-    // Subtle golden/cyan accent rule
+    // Golden accent border
     ctx.fillStyle = 'rgba(234, 179, 8, 0.3)';
     ctx.fillRect(0, letterboxH, width, 1);
     ctx.fillRect(0, height - letterboxH - 1, width, 1);
 
-    // C. Top Left Badge: Wan 2.1 Scene Watermark
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.8)';
-    ctx.strokeStyle = 'rgba(59, 130, 246, 0.5)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.roundRect(14, 8, 190, 22, 5);
-    ctx.fill();
-    ctx.stroke();
-
-    ctx.fillStyle = '#38bdf8';
-    ctx.font = 'bold 10px "Fira Code", monospace';
-    ctx.fillText(`SCENE ${sceneIndex + 1} • WAN 2.1 • ${resolution}`, 22, 23);
-
-    // D. Top Right Badge: Live Recording Timecode
-    const currentTimeSec = (progress * clipSeconds).toFixed(1);
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.8)';
-    ctx.beginPath();
-    ctx.roundRect(width - 92, 8, 78, 22, 5);
-    ctx.fill();
-    ctx.stroke();
-
-    ctx.fillStyle = '#ef4444';
-    ctx.beginPath();
-    ctx.arc(width - 80, 19, 3.5, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.fillStyle = '#e2e8f0';
-    ctx.font = 'bold 10px "Fira Code", monospace';
-    ctx.fillText(`00:${currentTimeSec.padStart(4, '0')}s`, width - 70, 23);
-
-    // E. Bottom Subtitle Lower-Third: Elegant voiceover narration display
+    // 3. Elegant Netflix-Style Lower-Third Subtitle for Narration
     const subText = narrationText || cleanSubject;
     if (subText) {
-      const cleanSub = subText.substring(0, 90);
-      ctx.fillStyle = 'rgba(8, 12, 22, 0.85)';
+      const cleanSub = subText.substring(0, 95);
+      ctx.fillStyle = 'rgba(6, 9, 16, 0.88)';
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.roundRect(16, height - letterboxH - 38, width - 32, 32, 6);
+      ctx.roundRect(16, height - letterboxH - 36, width - 32, 30, 6);
       ctx.fill();
       ctx.stroke();
 
-      ctx.fillStyle = '#f8fafc';
-      ctx.font = '500 12px "Plus Jakarta Sans", sans-serif';
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '600 12px "Plus Jakarta Sans", sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(`"${cleanSub}${subText.length > 90 ? '...' : ''}"`, width / 2, height - letterboxH - 18);
+      ctx.fillText(`"${cleanSub}${subText.length > 95 ? '...' : ''}"`, width / 2, height - letterboxH - 17);
       ctx.textAlign = 'left';
     }
   };
@@ -490,6 +763,12 @@ export const apiClient = {
     const jobs = getStoredJobs();
     jobs.unshift(newJob);
     saveStoredJobs(jobs);
+
+    // Warm up the visual for the first scene immediately
+    if (newJob.scenes && newJob.scenes.length > 0) {
+      prefetchSceneVisual(newJob.scenes[0].visual_prompt, newJob.aspect_ratio, 0);
+    }
+
     return newJob;
   },
 
@@ -657,6 +936,12 @@ export const apiClient = {
     job.currentVramMb = 16360;
     saveStoredJobs(jobs);
     this.notifyUpdate(jobId);
+
+    // Warm up the next scene's visual in background while this one generates!
+    const nextScene = job.scenes.find(s => s.scene_index === scene.scene_index + 1);
+    if (nextScene) {
+      prefetchSceneVisual(nextScene.visual_prompt, job.aspect_ratio, nextScene.scene_index);
+    }
 
     // 2. Generate video clip
     const clipUrl = await generateClientVideoClip(
