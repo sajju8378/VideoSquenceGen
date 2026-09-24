@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { dbService } from './db.ts';
 import type { SceneRecord, SceneStatus } from './types.ts';
 import { generateNarrationAudio } from './tts.ts';
+import { generateAIVideoClip } from './video_engine.ts';
 
 const execFileAsync = promisify(execFile);
 
@@ -272,19 +273,21 @@ async function _runWanGeneration(
       throw new TimeoutLeaseError(`Task exceeded @spaces.GPU(duration=60) ceiling.`);
     }
 
-    // 3. Real video clip rendering with ffmpeg
+    // 3. Real video clip rendering with HF LTX/Wan or high-grade motion engine
     peakVram = vramTracker.simulateAllocation(resolution, estimatedFrames);
-    const renderDelay = sim.acceleratedSpeed ? 600 : 1800;
+    const renderDelay = sim.acceleratedSpeed ? 400 : 1200;
     await new Promise(r => setTimeout(r, renderDelay));
 
-    await renderClipWithFFmpeg(
-      outputPath,
-      scene.visual_prompt,
-      scene.scene_index,
+    const genResult = await generateAIVideoClip({
+      prompt: scene.visual_prompt,
       durationSeconds,
       resolution,
-      aspectRatio
-    );
+      aspectRatio,
+      outputFilename: path.basename(outputPath),
+      sceneIndex: scene.scene_index,
+      imageUrl: scene.image_url || undefined,
+    });
+    peakVram = genResult.peakVramMb;
 
     return { outputPath, peakVram };
   } finally {

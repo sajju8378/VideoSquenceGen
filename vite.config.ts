@@ -3,19 +3,6 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import { defineConfig, Plugin } from 'vite';
 
-function apiPlugin(): Plugin {
-  return {
-    name: 'api-server',
-    async configureServer(server) {
-      const express = (await import('express')).default;
-      const app = express();
-      const { apiRouter } = await import('./server/api.ts');
-      app.use('/api', apiRouter);
-      server.middlewares.use(app);
-    },
-  };
-}
-
 function htmlPlugin(): Plugin {
   return {
     name: 'html-transform',
@@ -37,7 +24,7 @@ function htmlPlugin(): Plugin {
 export default defineConfig(() => {
   return {
     base: './',
-    plugins: [htmlPlugin(), react(), tailwindcss(), apiPlugin()],
+    plugins: [htmlPlugin(), react(), tailwindcss()],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

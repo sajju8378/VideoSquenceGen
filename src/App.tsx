@@ -5,6 +5,8 @@ import { QueueMonitor } from './components/QueueMonitor.tsx';
 import { CinemaViewer } from './components/CinemaViewer.tsx';
 import { LogsModal } from './components/LogsModal.tsx';
 import { ZeroGPUExportModal } from './components/ZeroGPUExportModal.tsx';
+import { LTXVideoGenerator } from './components/LTXVideoGenerator.tsx';
+import { CloudEngineModal } from './components/CloudEngineModal.tsx';
 import type { Job, Scene } from './types.ts';
 import { apiClient } from './services/apiClient.ts';
 import {
@@ -18,18 +20,20 @@ import {
   ShieldCheck,
   CheckCircle2,
   AlertCircle,
-  Square
+  Square,
+  Zap
 } from 'lucide-react';
 
 export default function App() {
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [currentJob, setCurrentJob] = useState<Job | null>(null);
   const [recentJobs, setRecentJobs] = useState<Job[]>([]);
-  const [activeTab, setActiveTab] = useState<'script' | 'queue' | 'cinema'>('script');
+  const [activeTab, setActiveTab] = useState<'ltx' | 'script' | 'queue' | 'cinema'>('ltx');
 
   const [selectedPreviewScene, setSelectedPreviewScene] = useState<Scene | null>(null);
   const [showLogsModal, setShowLogsModal] = useState<boolean>(false);
   const [showExportModal, setShowExportModal] = useState<boolean>(false);
+  const [showCloudSettingsModal, setShowCloudSettingsModal] = useState<boolean>(false);
 
   // Poll active job status
   const fetchActiveJob = async () => {
@@ -114,29 +118,45 @@ export default function App() {
         activeJobId={activeJobId}
         onOpenLogs={() => setShowLogsModal(true)}
         onOpenExport={() => setShowExportModal(true)}
+        onOpenCloudSettings={() => setShowCloudSettingsModal(true)}
       />
 
       {/* Main Studio Body */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 lg:px-8 py-6 space-y-6">
         {/* Navigation Tabs & Job Selector */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2 border-b border-slate-800/80">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setActiveTab('ltx')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition border cursor-pointer ${
+                activeTab === 'ltx'
+                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-blue-500 shadow-md shadow-blue-500/25 ring-1 ring-white/20'
+                  : 'bg-slate-900/80 text-slate-400 border-slate-800 hover:bg-slate-800 hover:text-slate-200'
+              }`}
+            >
+              <Zap className="w-4 h-4 text-amber-300" />
+              <span>⚡ Instant LTX Video</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/30 text-blue-200">
+                Direct
+              </span>
+            </button>
+
             <button
               onClick={() => setActiveTab('script')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition border ${
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition border cursor-pointer ${
                 activeTab === 'script'
                   ? 'bg-blue-600 text-white border-blue-500 shadow-md shadow-blue-500/20'
                   : 'bg-slate-900/80 text-slate-400 border-slate-800 hover:bg-slate-800 hover:text-slate-200'
               }`}
             >
               <Layers className="w-4 h-4" />
-              <span>1. Storyboard & Script</span>
+              <span>🎬 Storyboard & Multi-Scene</span>
             </button>
 
             <button
               onClick={() => setActiveTab('queue')}
               disabled={!activeJobId}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition border ${
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition border cursor-pointer ${
                 activeTab === 'queue'
                   ? 'bg-blue-600 text-white border-blue-500 shadow-md shadow-blue-500/20'
                   : !activeJobId
@@ -145,7 +165,7 @@ export default function App() {
               }`}
             >
               <Activity className="w-4 h-4" />
-              <span>2. Sequential Queue</span>
+              <span>Queue & Progress</span>
               {currentJob?.status === 'processing' && (
                 <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
               )}
@@ -154,7 +174,7 @@ export default function App() {
             <button
               onClick={() => setActiveTab('cinema')}
               disabled={!activeJobId}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition border ${
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition border cursor-pointer ${
                 activeTab === 'cinema'
                   ? 'bg-blue-600 text-white border-blue-500 shadow-md shadow-blue-500/20'
                   : !activeJobId
@@ -163,7 +183,7 @@ export default function App() {
               }`}
             >
               <Film className="w-4 h-4" />
-              <span>3. Cinema & Assembly</span>
+              <span>Cinema & Assembly</span>
               {currentJob?.final_video_path && (
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
               )}
@@ -199,6 +219,11 @@ export default function App() {
             </button>
           </div>
         </div>
+
+        {/* Tab 0: Instant LTX Video Generator */}
+        {activeTab === 'ltx' && (
+          <LTXVideoGenerator />
+        )}
 
         {/* Tab 1: Script & Storyboard Studio */}
         {activeTab === 'script' && (
@@ -268,6 +293,12 @@ export default function App() {
       <ZeroGPUExportModal
         isOpen={showExportModal}
         onClose={() => setShowExportModal(false)}
+      />
+
+      {/* Server Cloud Engine Configuration Modal */}
+      <CloudEngineModal
+        isOpen={showCloudSettingsModal}
+        onClose={() => setShowCloudSettingsModal(false)}
       />
     </div>
   );

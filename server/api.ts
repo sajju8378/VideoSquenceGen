@@ -6,6 +6,8 @@ import { splitScriptWithGemini, enhancePromptWithGemini } from './gemini.ts';
 import { processScene, runJobQueue, setJobSimulation, getJobSimulation, globalGPULock, vramTracker } from './gpu_worker.ts';
 import { assembleFinalVideo } from './assembler.ts';
 import { getZeroGPUPythonAppCode, getZeroGPURequirementsTxt, getZeroGPUReadme } from './spaces_exporter.ts';
+import { getServerConfig, updateServerConfig } from './settings.ts';
+import { generateAIVideoClip } from './video_engine.ts';
 
 export const apiRouter = Router();
 
@@ -329,3 +331,91 @@ apiRouter.get('/export/:filename', (req: Request, res: Response) => {
   }
   res.status(404).send('Unknown export file');
 });
+
+// 14. Server Cloud Engine Configuration (Safe: Never exposes full secret key to clients)
+apiRouter.get('/config', (req: Request, res: Response) => {
+  try {
+    const cfg = getServerConfig();
+    const hasHfToken = Boolean(cfg.hf_token && cfg.hf_token.trim().length > 0);
+    const tokenPreview = hasHfToken
+      ? `${cfg.hf_token!.substring(0, 4)}...${cfg.hf_token!.slice(-4)}`
+      : null;
+
+    res.json({
+      hasHfToken,
+      tokenPreview,
+      hfSpace: cfg.hf_space || 'Lightricks/ltx-video-distilled',
+      defaultEngine: cfg.default_engine || 'auto',
+      lastUpdated: cfg.last_updated || null,
+      status: 'online',
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/config', (req: Request, res: Response) => {
+  try {
+    const { hf_token, hf_space, default_engine } = req.body;
+    const updated = updateServerConfig({
+      hf_token: typeof hf_token === 'string' ? hf_token.trim() : undefined,
+      hf_space: typeof hf_space === 'string' ? hf_space.trim() : undefined,
+      default_engine: default_engine || 'auto',
+    });
+
+    res.json({
+      success: true,
+      hasHfToken: Boolean(updated.hf_token && updated.hf_token.length > 0),
+      hfSpace: updated.hf_space,
+      defaultEngine: updated.default_engine,
+      message: 'Server GPU engine configuration saved successfully',
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 15. Turnkey LTX Direct Video Generator Endpoint (Zero Token Needed for End Users!)
+apiRouter.post('/generate-single-video', async (req: Request, res: Response) => {
+  try {
+    const {
+      prompt,
+      duration,
+      aspectRatio,
+      resolution,
+      cameraMovement,
+      imageUrl,
+    } = req.body;
+
+    if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
+      return res.status(400).json({ error: 'Please provide a prompt for video generation' });
+    }
+
+    const durationSec = duration ? Number(duration) : 4.0;
+    const outputFilename = `ltx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.mp4`;
+
+    const result = await generateAIVideoClip({
+      prompt: prompt.trim(),
+      durationSeconds: durationSec,
+      aspectRatio: aspectRatio || '16:9',
+      resolution: resolution || '720p',
+      cameraMovement: cameraMovement || 'dynamic',
+      imageUrl: imageUrl || undefined,
+      outputFilename,
+    });
+
+    res.json({
+      success: true,
+      videoUrl: result.url,
+      filename: result.filename,
+      engineUsed: result.engineUsed,
+      duration: durationSec,
+      aspectRatio: aspectRatio || '16:9',
+      message: 'Video generated successfully',
+    });
+  } catch (err: any) {
+    console.error('[API] /generate-single-video failed:', err);
+    res.status(500).json({ error: err.message || 'Video generation failed' });
+  }
+});
+

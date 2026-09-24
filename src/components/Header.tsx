@@ -8,6 +8,7 @@ interface HeaderProps {
   activeJobId: string | null;
   onOpenLogs: () => void;
   onOpenExport: () => void;
+  onOpenCloudSettings: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -16,6 +17,7 @@ export const Header: React.FC<HeaderProps> = ({
   activeJobId,
   onOpenLogs,
   onOpenExport,
+  onOpenCloudSettings,
 }) => {
   const handleForceReset = async () => {
     await apiClient.resetGpuLock(activeJobId || undefined);
@@ -96,6 +98,15 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Action buttons */}
           <div className="flex items-center gap-2">
+            <button
+              onClick={onOpenCloudSettings}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-emerald-300 bg-emerald-950/40 hover:bg-emerald-900/50 border border-emerald-600/40 transition shadow-sm cursor-pointer"
+              title="Configure server-side Hugging Face GPU and LTX Video credentials (zero end-user friction)"
+            >
+              <Zap className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Cloud Engine</span>
+            </button>
+
             <button
               onClick={onOpenLogs}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 hover:text-white border border-slate-700/60 transition shadow-sm"

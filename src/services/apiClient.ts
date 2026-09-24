@@ -1352,4 +1352,93 @@ export const apiClient = {
     if (filename === 'README.md') return getZeroGPUReadme();
     return '';
   },
+
+  async getServerConfig(): Promise<{
+    hasHfToken: boolean;
+    tokenPreview: string | null;
+    hfSpace: string;
+    defaultEngine: string;
+    lastUpdated: string | null;
+    status: string;
+  }> {
+    try {
+      const res = await fetch('/api/config');
+      if (res.ok) return res.json();
+    } catch {}
+    return {
+      hasHfToken: false,
+      tokenPreview: null,
+      hfSpace: 'Lightricks/ltx-video-distilled',
+      defaultEngine: 'auto',
+      lastUpdated: null,
+      status: 'offline_fallback',
+    };
+  },
+
+  async updateServerConfig(payload: {
+    hf_token?: string;
+    hf_space?: string;
+    default_engine?: string;
+  }): Promise<{ success: boolean; message: string }> {
+    const res = await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to update server configuration');
+    }
+    return res.json();
+  },
+
+  async generateDirectVideo(params: {
+    prompt: string;
+    duration?: number;
+    aspectRatio?: string;
+    resolution?: string;
+    cameraMovement?: string;
+    imageUrl?: string;
+  }): Promise<{
+    success: boolean;
+    videoUrl: string;
+    filename: string;
+    engineUsed: string;
+    duration: number;
+    aspectRatio: string;
+  }> {
+    const hasBackend = await checkBackendAvailability();
+    if (hasBackend) {
+      const res = await fetch('/api/generate-single-video', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Direct video generation failed');
+      }
+      return res.json();
+    }
+
+    // Static fallback for browser-only execution (e.g. GitHub Pages)
+    const ratio = (params.aspectRatio as '16:9' | '9:16' | '1:1') || '16:9';
+    const clipUrl = await generateClientVideoClip(
+      params.prompt,
+      params.duration || 5.0,
+      params.resolution || '720p',
+      ratio,
+      0
+    );
+
+    return {
+      success: true,
+      videoUrl: clipUrl,
+      filename: `client_${Date.now()}.mp4`,
+      engineUsed: 'client_motion_engine',
+      duration: params.duration || 5.0,
+      aspectRatio: ratio,
+    };
+  },
 };
+
