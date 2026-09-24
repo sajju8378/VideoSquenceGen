@@ -64,14 +64,26 @@ export default function App() {
     if (!activeJobId) return;
     fetchActiveJob();
 
-    // Poll every 1.5 seconds if processing
+    // Listen to custom updates from apiClient for real-time reactivity
+    const handleUpdate = (e: Event) => {
+      const customEvent = e as CustomEvent<{ jobId?: string }>;
+      if (!customEvent.detail?.jobId || customEvent.detail.jobId === activeJobId) {
+        fetchActiveJob();
+      }
+    };
+    window.addEventListener('wanscript_update', handleUpdate);
+
+    // Poll every 1.2 seconds if processing
     const interval = setInterval(() => {
       if (currentJob?.status === 'processing') {
         fetchActiveJob();
       }
-    }, 1500);
+    }, 1200);
 
-    return () => clearInterval(interval);
+    return () => {
+      window.removeEventListener('wanscript_update', handleUpdate);
+      clearInterval(interval);
+    };
   }, [activeJobId, currentJob?.status]);
 
   const handleJobCreated = (jobId: string) => {

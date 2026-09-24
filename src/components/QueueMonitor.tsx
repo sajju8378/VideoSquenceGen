@@ -5,18 +5,20 @@ import {
   CheckCircle2,
   AlertTriangle,
   Clock,
-  Lock,
-  Cpu,
   RefreshCw,
   Film,
-  Zap,
   Volume2,
   Bug,
-  ShieldAlert,
-  ArrowRight
+  Download,
+  ArrowRight,
+  Sparkles,
+  ChevronDown,
+  ChevronUp,
+  Check,
+  Video
 } from 'lucide-react';
 import type { Job, Scene } from '../types.ts';
-import { apiClient } from '../services/apiClient.ts';
+import { apiClient, downloadVideoFile } from '../services/apiClient.ts';
 
 interface QueueMonitorProps {
   job: Job;
@@ -30,7 +32,9 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
   onSelectScenePreview,
 }) => {
   const [isStartingQueue, setIsStartingQueue] = useState(false);
+  const [generatingSceneId, setGeneratingSceneId] = useState<string | null>(null);
   const [retryingSceneId, setRetryingSceneId] = useState<string | null>(null);
+  const [expandedPreviewSceneId, setExpandedPreviewSceneId] = useState<string | null>(null);
 
   // Simulation test modes
   const [simOOM, setSimOOM] = useState<boolean>(false);
@@ -43,11 +47,53 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
   const failedCount = scenes.filter(s => s.status === 'failed').length;
   const progressPercent = scenes.length > 0 ? Math.round((completedCount / scenes.length) * 100) : 0;
 
+  // Find next pending scene and last completed scene for guided step-by-step flow
+  const nextPendingScene = scenes.find(s => s.status === 'pending');
+  const activeGeneratingScene = scenes.find(s => s.status === 'generating');
+  const lastCompletedScene = [...scenes].reverse().find(s => s.status === 'done');
+
+  const resolveClipUrl = (filePath: string | null) => {
+    if (!filePath) return '';
+    if (filePath.startsWith('blob:') || filePath.startsWith('data:') || filePath.startsWith('http')) {
+      return filePath;
+    }
+    const filename = filePath.split('/').pop() || '';
+    return `/api/media/clips/${filename}`;
+  };
+
+  const handleDownloadScene = (scene: Scene, index: number) => {
+    if (!scene.output_path) return;
+    const url = resolveClipUrl(scene.output_path);
+    const filename = `scene_${index + 1}_${scene.resolution || '720p'}.mp4`;
+    downloadVideoFile(url, filename);
+  };
+
+  const handleDownloadAll = () => {
+    const doneScenes = scenes.filter(s => s.status === 'done' && s.output_path);
+    doneScenes.forEach((s, idx) => {
+      setTimeout(() => {
+        handleDownloadScene(s, s.scene_index ?? idx);
+      }, idx * 300);
+    });
+  };
+
+  const handleGenerateSingle = async (sceneId: string, forcedResolution?: string) => {
+    setGeneratingSceneId(sceneId);
+    try {
+      await apiClient.generateSingleScene(job.id, sceneId, forcedResolution);
+      onRefreshJob();
+    } catch (err) {
+      console.error('Failed to generate scene:', err);
+    } finally {
+      setGeneratingSceneId(null);
+    }
+  };
+
   const handleStartQueue = async () => {
     setIsStartingQueue(true);
     try {
       const simConfig = {
-        simulateOOMOnSceneIndex: simOOM ? 1 : undefined, // Scene 2 OOM
+        simulateOOMOnSceneIndex: simOOM ? 1 : undefined,
         simulateQuotaOnSceneIndex: simQuota ? 0 : undefined,
         simulateTimeoutOnSceneIndex: simTimeout ? 0 : undefined,
         acceleratedSpeed,
@@ -116,269 +162,464 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Queue Header & Global Lock State */}
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 md:p-6 shadow-xl backdrop-blur-sm space-y-4">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-4 border-b border-slate-800">
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-base font-semibold text-white">Sequential Generation Queue</h2>
-              <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-slate-800 text-slate-300">
-                Job: {job.id}
-              </span>
+      {/* 1. GUIDED STEP-BY-STEP PROCEED CONTROLLER BANNER (Requirement: 1-by-1 generation with direct download & proceed) */}
+      <div className="rounded-2xl border border-blue-500/30 bg-gradient-to-r from-blue-950/40 via-slate-900 to-indigo-950/40 p-5 md:p-6 shadow-2xl backdrop-blur-sm relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-80 h-80 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5 relative z-10">
+          <div className="space-y-2">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-blue-500/20 text-blue-300 border border-blue-400/30">
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Step-by-Step Production Mode</span>
             </div>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Processes scenes sequentially behind a single process-wide lock. Completed scenes are saved to disk
-              and will never be regenerated.
-            </p>
+
+            {/* Dynamic Step Title */}
+            {activeGeneratingScene ? (
+              <div>
+                <h2 className="text-lg md:text-xl font-bold text-white flex items-center gap-2.5">
+                  <RefreshCw className="w-5 h-5 text-blue-400 animate-spin" />
+                  <span>Generating Video {activeGeneratingScene.scene_index + 1}...</span>
+                </h2>
+                <p className="text-xs text-slate-300 mt-1 max-w-xl">
+                  Wan 2.1 single GPU lock acquired. Synthesizing visual frames and audio waveform for Scene {activeGeneratingScene.scene_index + 1}.
+                </p>
+              </div>
+            ) : completedCount === scenes.length && scenes.length > 0 ? (
+              <div>
+                <h2 className="text-lg md:text-xl font-bold text-emerald-400 flex items-center gap-2">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                  <span>All {scenes.length} Videos Generated Successfully!</span>
+                </h2>
+                <p className="text-xs text-slate-300 mt-1">
+                  Each scene video clip is persisted and ready for download or one-click multi-scene cinema assembly.
+                </p>
+              </div>
+            ) : nextPendingScene ? (
+              <div>
+                <h2 className="text-lg md:text-xl font-bold text-white flex items-center gap-2">
+                  <span>
+                    {nextPendingScene.scene_index === 0
+                      ? 'Ready to Generate Video 1'
+                      : `Video ${nextPendingScene.scene_index} Ready! Next: Video ${nextPendingScene.scene_index + 1}`}
+                  </span>
+                </h2>
+                <p className="text-xs text-slate-300 mt-1 max-w-2xl line-clamp-2">
+                  {nextPendingScene.scene_index === 0 ? (
+                    <>Generate Video 1 first. You can download and review the clip before proceeding to subsequent scenes.</>
+                  ) : (
+                    <>
+                      Download or review Video {nextPendingScene.scene_index} below, then click to generate Video {nextPendingScene.scene_index + 1}:
+                      <span className="italic text-slate-200 ml-1">"{nextPendingScene.visual_prompt}"</span>
+                    </>
+                  )}
+                </p>
+              </div>
+            ) : (
+              <div>
+                <h2 className="text-lg md:text-xl font-bold text-white">Queue Overview</h2>
+                <p className="text-xs text-slate-400 mt-1">Manage scene generations and download individual MP4 clips.</p>
+              </div>
+            )}
           </div>
 
-          {/* Start/Resume Button */}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleStartQueue}
-              disabled={isStartingQueue || job.status === 'processing'}
-              className="px-5 py-2.5 rounded-xl font-bold text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-blue-600/25 transition cursor-pointer"
-            >
-              {job.status === 'processing' ? (
-                <>
-                  <RefreshCw className="w-4 h-4 animate-spin text-white" />
-                  <span>Processing Queue...</span>
-                </>
-              ) : completedCount === scenes.length && scenes.length > 0 ? (
-                <>
-                  <RotateCcw className="w-4 h-4" />
-                  <span>Restart Queue</span>
-                </>
-              ) : (
-                <>
-                  <Play className="w-4 h-4 fill-white" />
-                  <span>Start Sequential Queue</span>
-                </>
-              )}
-            </button>
+          {/* Action Buttons in Step-by-Step Banner */}
+          <div className="flex flex-wrap items-center gap-3">
+            {/* If Video N was just completed, show direct download button for it */}
+            {lastCompletedScene && lastCompletedScene.output_path && !activeGeneratingScene && (
+              <button
+                onClick={() => handleDownloadScene(lastCompletedScene, lastCompletedScene.scene_index)}
+                className="px-4 py-2.5 rounded-xl font-bold text-xs text-emerald-300 bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-500/40 flex items-center gap-2 shadow-lg transition cursor-pointer"
+                title={`Download Video ${lastCompletedScene.scene_index + 1} (.mp4)`}
+              >
+                <Download className="w-4 h-4 text-emerald-400" />
+                <span>Download Video {lastCompletedScene.scene_index + 1}</span>
+              </button>
+            )}
+
+            {/* If there is a next pending scene, show prominent "Generate Video [N]" or "Proceed to Video [N]" */}
+            {nextPendingScene && (
+              <button
+                onClick={() => handleGenerateSingle(nextPendingScene.id)}
+                disabled={!!activeGeneratingScene || generatingSceneId === nextPendingScene.id}
+                className="px-5 py-2.5 rounded-xl font-bold text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 flex items-center gap-2 shadow-xl shadow-blue-600/30 transition cursor-pointer"
+              >
+                {generatingSceneId === nextPendingScene.id || activeGeneratingScene?.id === nextPendingScene.id ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Synthesizing Video {nextPendingScene.scene_index + 1}...</span>
+                  </>
+                ) : nextPendingScene.scene_index === 0 ? (
+                  <>
+                    <Play className="w-4 h-4 fill-white" />
+                    <span>Generate Video 1 Now</span>
+                  </>
+                ) : (
+                  <>
+                    <ArrowRight className="w-4 h-4" />
+                    <span>Proceed to Generate Video {nextPendingScene.scene_index + 1}</span>
+                  </>
+                )}
+              </button>
+            )}
+
+            {/* Batch Auto-Advance Queue Option */}
+            {nextPendingScene && (
+              <button
+                onClick={handleStartQueue}
+                disabled={isStartingQueue || job.status === 'processing'}
+                className="px-4 py-2.5 rounded-xl font-medium text-xs text-slate-300 bg-slate-800 hover:bg-slate-750 hover:text-white border border-slate-700 flex items-center gap-2 transition cursor-pointer"
+                title="Automatically process all remaining scenes sequentially"
+              >
+                <Play className="w-3.5 h-3.5 text-slate-400" />
+                <span>Run All Sequentially</span>
+              </button>
+            )}
+
+            {/* When all done, allow downloading all or restarting */}
+            {completedCount === scenes.length && scenes.length > 0 && (
+              <>
+                <button
+                  onClick={handleDownloadAll}
+                  className="px-4 py-2.5 rounded-xl font-bold text-xs text-white bg-emerald-600 hover:bg-emerald-500 flex items-center gap-2 shadow-lg transition cursor-pointer"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Download All {scenes.length} Clips</span>
+                </button>
+                <button
+                  onClick={handleStartQueue}
+                  className="px-4 py-2.5 rounded-xl font-medium text-xs text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 flex items-center gap-2 transition cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Regenerate Queue</span>
+                </button>
+              </>
+            )}
           </div>
         </div>
 
         {/* Progress Bar & Stats */}
-        <div className="space-y-2">
+        <div className="mt-5 pt-4 border-t border-slate-800/80 space-y-2">
           <div className="flex items-center justify-between text-xs font-mono">
             <span className="text-slate-400">
-              Completed Scenes: <strong className="text-white">{completedCount}</strong> / {scenes.length}
+              Generated Videos: <strong className="text-emerald-400 font-bold">{completedCount}</strong> / {scenes.length}
             </span>
-            <span className="text-blue-400 font-bold">{progressPercent}%</span>
+            <span className="text-blue-400 font-bold">{progressPercent}% Completed</span>
           </div>
-          <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
+          <div className="w-full h-2.5 rounded-full bg-slate-800/80 overflow-hidden p-0.5 border border-slate-700/50">
             <div
-              className="h-full bg-gradient-to-r from-blue-600 to-emerald-500 transition-all duration-500"
+              className="h-full rounded-full bg-gradient-to-r from-blue-600 via-indigo-500 to-emerald-400 transition-all duration-500"
               style={{ width: `${progressPercent}%` }}
             />
           </div>
         </div>
+      </div>
 
-        {/* Resilience Laboratory Controls */}
-        <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-xs font-semibold text-amber-400">
-              <Bug className="w-4 h-4 text-amber-400" />
-              <span>Resilience & Failure Recovery Laboratory</span>
+      {/* 2. Resilience Edge-Case Simulator Controls (Collapsible / Compact) */}
+      <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 md:p-5 shadow-lg space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-xs font-semibold text-amber-400">
+            <Bug className="w-4 h-4 text-amber-400" />
+            <span>ZeroGPU Fault Injection & Testing Simulator</span>
+          </div>
+          <span className="text-[11px] text-slate-500 font-mono">Simulate real Hugging Face ZeroGPU edge cases</span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs">
+          {/* OOM Trigger */}
+          <label
+            className={`p-2.5 rounded-lg border cursor-pointer transition flex items-start gap-2.5 ${
+              simOOM
+                ? 'bg-amber-950/30 border-amber-600/50 text-amber-200'
+                : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={simOOM}
+              onChange={e => setSimOOM(e.target.checked)}
+              className="mt-0.5 accent-amber-500 cursor-pointer"
+            />
+            <div>
+              <span className="font-semibold block text-slate-200">Test OOM on Scene 2</span>
+              <span className="text-[11px] text-slate-400">
+                Verifies automatic downgrade (720p→480p) & recovery.
+              </span>
             </div>
-            <span className="text-[11px] text-slate-500 font-mono">Simulate real ZeroGPU edge cases</span>
-          </div>
+          </label>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs">
-            {/* OOM Trigger */}
-            <label
-              className={`p-2.5 rounded-lg border cursor-pointer transition flex items-start gap-2.5 ${
-                simOOM
-                  ? 'bg-amber-950/30 border-amber-600/50 text-amber-200'
-                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
-              }`}
-            >
-              <input
-                type="checkbox"
-                checked={simOOM}
-                onChange={e => setSimOOM(e.target.checked)}
-                className="mt-0.5 accent-amber-500"
-              />
-              <div>
-                <span className="font-semibold block text-slate-200">Test OOM on Scene 2</span>
-                <span className="text-[11px] text-slate-400">
-                  Verifies automatic downgrade (720p→480p) & recovery.
-                </span>
-              </div>
-            </label>
+          {/* Quota Exceeded Trigger */}
+          <label
+            className={`p-2.5 rounded-lg border cursor-pointer transition flex items-start gap-2.5 ${
+              simQuota
+                ? 'bg-purple-950/30 border-purple-600/50 text-purple-200'
+                : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={simQuota}
+              onChange={e => setSimQuota(e.target.checked)}
+              className="mt-0.5 accent-purple-500 cursor-pointer"
+            />
+            <div>
+              <span className="font-semibold block text-slate-200">Test Quota Exceeded</span>
+              <span className="text-[11px] text-slate-400">
+                Verifies exponential backoff & status surface.
+              </span>
+            </div>
+          </label>
 
-            {/* Quota Exceeded Trigger */}
-            <label
-              className={`p-2.5 rounded-lg border cursor-pointer transition flex items-start gap-2.5 ${
-                simQuota
-                  ? 'bg-purple-950/30 border-purple-600/50 text-purple-200'
-                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
-              }`}
-            >
-              <input
-                type="checkbox"
-                checked={simQuota}
-                onChange={e => setSimQuota(e.target.checked)}
-                className="mt-0.5 accent-purple-500"
-              />
-              <div>
-                <span className="font-semibold block text-slate-200">Test Quota Exceeded</span>
-                <span className="text-[11px] text-slate-400">
-                  Verifies exponential backoff & status surface.
-                </span>
-              </div>
-            </label>
+          {/* Lease Timeout Trigger */}
+          <label
+            className={`p-2.5 rounded-lg border cursor-pointer transition flex items-start gap-2.5 ${
+              simTimeout
+                ? 'bg-red-950/30 border-red-600/50 text-red-200'
+                : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={simTimeout}
+              onChange={e => setSimTimeout(e.target.checked)}
+              className="mt-0.5 accent-red-500 cursor-pointer"
+            />
+            <div>
+              <span className="font-semibold block text-slate-200">Test Lease Timeout</span>
+              <span className="text-[11px] text-slate-400">
+                Verifies duration budget reduction adaptation.
+              </span>
+            </div>
+          </label>
 
-            {/* Lease Timeout Trigger */}
-            <label
-              className={`p-2.5 rounded-lg border cursor-pointer transition flex items-start gap-2.5 ${
-                simTimeout
-                  ? 'bg-red-950/30 border-red-600/50 text-red-200'
-                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
-              }`}
-            >
-              <input
-                type="checkbox"
-                checked={simTimeout}
-                onChange={e => setSimTimeout(e.target.checked)}
-                className="mt-0.5 accent-red-500"
-              />
-              <div>
-                <span className="font-semibold block text-slate-200">Test Lease Timeout</span>
-                <span className="text-[11px] text-slate-400">
-                  Verifies duration budget reduction adaptation.
-                </span>
-              </div>
-            </label>
-
-            {/* Accelerated Speed */}
-            <label
-              className={`p-2.5 rounded-lg border cursor-pointer transition flex items-start gap-2.5 ${
-                acceleratedSpeed
-                  ? 'bg-blue-950/30 border-blue-600/50 text-blue-200'
-                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
-              }`}
-            >
-              <input
-                type="checkbox"
-                checked={acceleratedSpeed}
-                onChange={e => setAcceleratedSpeed(e.target.checked)}
-                className="mt-0.5 accent-blue-500"
-              />
-              <div>
-                <span className="font-semibold block text-slate-200">Accelerated Demo Speed</span>
-                <span className="text-[11px] text-slate-400">
-                  Quick clip synthesis for rapid UI testing.
-                </span>
-              </div>
-            </label>
-          </div>
+          {/* Accelerated Speed */}
+          <label
+            className={`p-2.5 rounded-lg border cursor-pointer transition flex items-start gap-2.5 ${
+              acceleratedSpeed
+                ? 'bg-blue-950/30 border-blue-600/50 text-blue-200'
+                : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={acceleratedSpeed}
+              onChange={e => setAcceleratedSpeed(e.target.checked)}
+              className="mt-0.5 accent-blue-500 cursor-pointer"
+            />
+            <div>
+              <span className="font-semibold block text-slate-200">Fast Generation Speed</span>
+              <span className="text-[11px] text-slate-400">
+                Quick synthesis for snappy step-by-step testing.
+              </span>
+            </div>
+          </label>
         </div>
       </div>
 
-      {/* Per-Scene Queue Table / Cards (Requirement #4 & #8) */}
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 md:p-6 shadow-xl backdrop-blur-sm space-y-3">
-        <h3 className="text-sm font-semibold text-white flex items-center justify-between">
-          <span>Scene Execution Ledger</span>
-          <span className="text-xs font-mono text-slate-500 font-normal">
-            Independent state per scene • SQLite persisted
-          </span>
-        </h3>
+      {/* 3. SCENE EXECUTION LEDGER (With Direct Download & Individual Generation Buttons) */}
+      <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 md:p-6 shadow-xl backdrop-blur-sm space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-800">
+          <div>
+            <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+              <Video className="w-4 h-4 text-blue-400" />
+              <span>Scene Execution Ledger</span>
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Generate each video clip individually or sequentially. Download links appear immediately upon completion.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {completedCount > 0 && (
+              <button
+                onClick={handleDownloadAll}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5 text-blue-400" />
+                <span>Download All ({completedCount})</span>
+              </button>
+            )}
+          </div>
+        </div>
 
-        <div className="space-y-3 pt-2">
-          {scenes.map((scene, idx) => (
-            <div
-              key={scene.id}
-              className={`p-4 rounded-xl border transition space-y-3 ${
-                scene.status === 'generating'
-                  ? 'bg-blue-950/20 border-blue-500/40 ring-1 ring-blue-500/20'
-                  : scene.status === 'done'
-                  ? 'bg-slate-950/70 border-slate-800'
-                  : scene.status === 'failed'
-                  ? 'bg-red-950/20 border-red-500/40'
-                  : 'bg-slate-950/50 border-slate-800/80'
-              }`}
-            >
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <div className="flex items-center gap-2.5">
-                  <span className="w-6 h-6 rounded-md bg-slate-800 text-slate-200 font-mono text-xs font-bold flex items-center justify-center border border-slate-700">
-                    {idx + 1}
-                  </span>
+        <div className="space-y-4 pt-1">
+          {scenes.map((scene, idx) => {
+            const isGeneratingThis = generatingSceneId === scene.id || scene.status === 'generating';
+            const isExpanded = expandedPreviewSceneId === scene.id;
+            const hasNextScene = idx < scenes.length - 1;
+            const nextScene = hasNextScene ? scenes[idx + 1] : null;
+
+            return (
+              <div
+                key={scene.id}
+                className={`p-4 md:p-5 rounded-xl border transition space-y-3.5 ${
+                  scene.status === 'generating'
+                    ? 'bg-blue-950/25 border-blue-500/50 ring-1 ring-blue-500/30'
+                    : scene.status === 'done'
+                    ? 'bg-slate-950/70 border-slate-800 hover:border-slate-700'
+                    : scene.status === 'failed'
+                    ? 'bg-red-950/20 border-red-500/40'
+                    : 'bg-slate-950/50 border-slate-800/80'
+                }`}
+              >
+                {/* Header Row */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-7 h-7 rounded-lg bg-slate-800 text-slate-200 font-mono text-xs font-bold flex items-center justify-center border border-slate-700">
+                      {idx + 1}
+                    </span>
+                    <div>
+                      <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                        <span>Video Scene {idx + 1}</span>
+                        <span className="font-mono text-[10px] text-slate-500 font-normal">[{scene.id}]</span>
+                      </h4>
+                      <span className="text-[11px] text-slate-400 font-mono">
+                        Target: {scene.target_duration_seconds}s • {scene.resolution || '720p'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    {getStatusBadge(scene)}
+
+                    {/* ACTION BUTTONS FOR THIS SCENE */}
+
+                    {/* 1. If Pending: Direct "Generate Video N" button */}
+                    {scene.status === 'pending' && (
+                      <button
+                        onClick={() => handleGenerateSingle(scene.id)}
+                        disabled={isGeneratingThis || job.status === 'processing'}
+                        className="px-3.5 py-1.5 rounded-lg text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 flex items-center gap-1.5 shadow-md shadow-blue-600/20 transition cursor-pointer"
+                        title={`Generate Video ${idx + 1} with Wan 2.1`}
+                      >
+                        {isGeneratingThis ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            <span>Generating...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Play className="w-3.5 h-3.5 fill-white" />
+                            <span>Generate Video {idx + 1}</span>
+                          </>
+                        )}
+                      </button>
+                    )}
+
+                    {/* 2. If Done: Prominent Download Link & Preview */}
+                    {scene.status === 'done' && (
+                      <>
+                        {/* Direct Download Button */}
+                        <button
+                          onClick={() => handleDownloadScene(scene, idx)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-bold text-emerald-300 bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-500/40 flex items-center gap-1.5 shadow-sm transition cursor-pointer"
+                          title={`Download Video ${idx + 1} (.mp4)`}
+                        >
+                          <Download className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Download Video {idx + 1}</span>
+                        </button>
+
+                        {/* Inline Player Toggle */}
+                        <button
+                          onClick={() => setExpandedPreviewSceneId(isExpanded ? null : scene.id)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 flex items-center gap-1.5 transition cursor-pointer"
+                        >
+                          <Film className="w-3.5 h-3.5 text-blue-400" />
+                          <span>{isExpanded ? 'Hide Video' : 'Watch Video'}</span>
+                          {isExpanded ? <ChevronUp className="w-3 h-3 ml-0.5" /> : <ChevronDown className="w-3 h-3 ml-0.5" />}
+                        </button>
+
+                        {/* Next Scene Proceed Button (if next scene is pending) */}
+                        {nextScene && nextScene.status === 'pending' && (
+                          <button
+                            onClick={() => handleGenerateSingle(nextScene.id)}
+                            disabled={!!generatingSceneId || job.status === 'processing'}
+                            className="px-3.5 py-1.5 rounded-lg text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 flex items-center gap-1.5 shadow-md shadow-indigo-600/20 transition cursor-pointer"
+                            title={`Proceed to Generate Video ${idx + 2}`}
+                          >
+                            <span>Proceed to Video {idx + 2}</span>
+                            <ArrowRight className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </>
+                    )}
+
+                    {/* 3. If Failed: Retry Button */}
+                    {scene.status === 'failed' && (
+                      <button
+                        onClick={() => handleRetryScene(scene.id, '480p')}
+                        disabled={retryingSceneId === scene.id}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-red-600 hover:bg-red-500 flex items-center gap-1.5 transition cursor-pointer"
+                        title="Retry only this scene at 480p"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>Retry (480p)</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Inline Video Player for Completed Scene */}
+                {isExpanded && scene.output_path && (
+                  <div className="p-3 rounded-xl bg-black/60 border border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between text-xs text-slate-400 font-mono">
+                      <span className="flex items-center gap-1.5">
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        Generated Video Clip ({scene.resolution || '720p'})
+                      </span>
+                      <button
+                        onClick={() => handleDownloadScene(scene, idx)}
+                        className="text-xs text-blue-400 hover:text-blue-300 font-medium flex items-center gap-1"
+                      >
+                        <Download className="w-3 h-3" />
+                        Download File
+                      </button>
+                    </div>
+                    <div className="relative rounded-lg overflow-hidden bg-slate-950 flex items-center justify-center max-h-64 aspect-video">
+                      <video
+                        src={resolveClipUrl(scene.output_path)}
+                        controls
+                        autoPlay
+                        loop
+                        className="w-full h-full object-contain"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Visual Prompt & Narration Details */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs bg-slate-900/60 p-3.5 rounded-xl border border-slate-800/80">
                   <div>
-                    <h4 className="text-xs font-bold text-white flex items-center gap-2">
-                      <span>Scene {idx + 1}</span>
-                      <span className="font-mono text-[10px] text-slate-500">[{scene.id}]</span>
-                    </h4>
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                      Visual Prompt
+                    </span>
+                    <p className="text-slate-300 leading-relaxed">{scene.visual_prompt}</p>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1 flex items-center gap-1.5">
+                      <Volume2 className="w-3.5 h-3.5 text-blue-400" />
+                      Voiceover Narration ({scene.target_duration_seconds}s)
+                    </span>
+                    <p className="text-slate-300 italic leading-relaxed">"{scene.narration_text}"</p>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2.5">
-                  {getStatusBadge(scene)}
-
-                  <span className="text-[11px] text-slate-400 font-mono">
-                    Attempt #{scene.attempt_count}
-                  </span>
-
-                  {/* Actions for this scene */}
-                  {scene.status === 'failed' && (
-                    <button
-                      onClick={() => handleRetryScene(scene.id, '480p')}
-                      disabled={retryingSceneId === scene.id}
-                      className="px-2.5 py-1 rounded text-xs font-medium text-white bg-red-600 hover:bg-red-500 flex items-center gap-1 transition"
-                      title="Retry only this scene at 480p"
-                    >
-                      <RotateCcw className="w-3 h-3" />
-                      <span>Retry (480p)</span>
-                    </button>
-                  )}
-
-                  {scene.status === 'done' && (
-                    <button
-                      onClick={() => onSelectScenePreview?.(scene)}
-                      className="px-2.5 py-1 rounded text-xs font-medium text-blue-300 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 flex items-center gap-1 transition"
-                    >
-                      <Film className="w-3 h-3" />
-                      <span>Preview Clip</span>
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Visual Prompt & Narration Text */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs bg-slate-900/60 p-3 rounded-lg border border-slate-800/80">
-                <div>
-                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-0.5">
-                    Visual Prompt
-                  </span>
-                  <p className="text-slate-300 line-clamp-2">{scene.visual_prompt}</p>
-                </div>
-                <div>
-                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-0.5 flex items-center gap-1">
-                    <Volume2 className="w-3 h-3 text-blue-400" />
-                    Voiceover Narration ({scene.target_duration_seconds}s)
-                  </span>
-                  <p className="text-slate-300 italic line-clamp-2">"{scene.narration_text}"</p>
-                </div>
-              </div>
-
-              {/* Error Callout (if failed or warning) */}
-              {scene.last_error && (
-                <div
-                  className={`p-2.5 rounded-lg text-xs flex items-start gap-2 ${
-                    scene.status === 'failed'
-                      ? 'bg-red-950/40 border border-red-500/30 text-red-300'
-                      : 'bg-amber-950/40 border border-amber-500/30 text-amber-300'
-                  }`}
-                >
-                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                  <div className="font-mono text-[11px] leading-relaxed">
-                    <strong>Resilience Event:</strong> {scene.last_error}
+                {/* Error Callout (if failed or warning) */}
+                {scene.last_error && (
+                  <div
+                    className={`p-3 rounded-lg text-xs flex items-start gap-2.5 ${
+                      scene.status === 'failed'
+                        ? 'bg-red-950/40 border border-red-500/30 text-red-300'
+                        : 'bg-amber-950/40 border border-amber-500/30 text-amber-300'
+                    }`}
+                  >
+                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <div className="font-mono text-[11px] leading-relaxed">
+                      <strong>Resilience Event:</strong> {scene.last_error}
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
-          ))}
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

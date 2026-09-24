@@ -127,10 +127,11 @@ apiRouter.post('/jobs/:id/start', async (req: Request, res: Response) => {
   }
 });
 
-// 6. Retry isolated scene
-apiRouter.post('/jobs/:id/retry-scene', async (req: Request, res: Response) => {
+// 6. Retry isolated scene or generate single scene
+apiRouter.post(['/jobs/:id/retry-scene', '/jobs/:id/scenes/:sceneId/generate'], async (req: Request, res: Response) => {
   try {
-    const { sceneId, forcedResolution } = req.body;
+    const sceneId = req.params.sceneId || req.body.sceneId;
+    const forcedResolution = req.body.forcedResolution;
     if (!sceneId) return res.status(400).json({ error: 'sceneId is required' });
 
     dbService.resetSceneForRetry(sceneId);
@@ -144,7 +145,7 @@ apiRouter.post('/jobs/:id/retry-scene', async (req: Request, res: Response) => {
       }
     });
 
-    res.json({ message: `Scene ${sceneId} queued for retry`, sceneId });
+    res.json({ message: `Scene ${sceneId} queued for generation`, sceneId });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
