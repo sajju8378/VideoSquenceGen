@@ -1,33 +1,38 @@
-# Direct Branch Deployment (`main` branch)
+# GitHub Pages Deployment Guide
 
-This repository is pre-configured and pre-compiled to deploy directly from the **`main`** branch without requiring GitHub Actions.
-
-### What Was Configured:
-1. **Pre-compiled Assets in `main`**:
-   - `index.html` references `./assets/app.js` and `./assets/app.css` directly.
-   - `assets/app.js` and `assets/app.css` are committed directly to the repository.
-   - Both `/` (root) and `/docs/` folders are bundled with the exact same files and `.nojekyll`.
-2. **Dual-Environment Support**:
-   - In live development (`npm run dev` in AI Studio or locally), Vite automatically resolves `/src/main.tsx` dynamically with hot reloading.
-   - On GitHub Pages (`main` branch), GitHub Pages serves the static compiled bundle (`assets/app.js`) with the correct MIME type `text/javascript`.
-3. **Removed GitHub Actions**:
-   - Removed `.github/workflows/` so all deployments come exclusively from your `main` branch.
+This repository supports both **Automatic GitHub Actions deployment** (recommended) and **Direct Branch deployment** (`main` branch).
 
 ---
 
-### How to Deploy from `main` on GitHub:
-1. Push your changes to the **`main`** branch on GitHub:
-   ```bash
-   git add .
-   git commit -m "Deploy compiled assets for GitHub Pages"
-   git push origin main
-   ```
-2. On GitHub:
-   - Go to your repository **Settings** → **Pages** (in the left sidebar).
+### Option 1: Automatic GitHub Actions Deployment (Recommended)
+
+A workflow file is configured at `.github/workflows/deploy.yml`.
+
+1. In your GitHub repository (`sajju8378/VideoSquenceGen`):
+   - Go to **Settings** → **Pages** (in the left sidebar).
    - Under **Build and deployment**:
-     - **Source**: Select **"Deploy from a branch"**.
-     - **Branch**: Select **`main`** and **`/ (root)`** (or `/docs`).
-     - Click **Save**.
+     - **Source**: Select **"GitHub Actions"**.
+2. Whenever changes are pushed to `main`, GitHub Actions will automatically:
+   - Install dependencies
+   - Run `npm run build`
+   - Deploy the fresh 3-choice video generation UI to GitHub Pages.
+3. You can also manually trigger a deployment at any time:
+   - Go to the **Actions** tab in your repository.
+   - Click **Deploy to GitHub Pages** in the left sidebar.
+   - Click **Run workflow** → **Run workflow**.
+
+---
+
+### Option 2: Direct Branch Deployment (`main` branch)
+
+If you prefer deploying directly from the `main` branch without GitHub Actions:
+
+1. Assets are pre-compiled and committed to:
+   - `/assets/app.js` and `/assets/app.css` (Root)
+   - `/docs/assets/app.js` and `/docs/assets/app.css` (`/docs` directory)
+2. In GitHub repository **Settings** → **Pages**:
+   - **Source**: Select **"Deploy from a branch"**.
+   - **Branch**: Select **`main`** and **`/docs`** (or `/root`).
+   - Click **Save**.
 3. In 1–2 minutes, visit:
    `https://sajju8378.github.io/VideoSquenceGen/`
-   The site will load without the `404` or `application/octet-stream` error.

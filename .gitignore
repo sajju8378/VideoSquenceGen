@@ -6,3 +6,5 @@ coverage/
 *.log
 .env*
 !.env.example
+storage/db/*.db*
+test_*.jpg
