@@ -67,6 +67,31 @@ export const LTXVideoGenerator: React.FC = () => {
   const [currentVideo, setCurrentVideo] = useState<GeneratedVideo | null>(null);
   const [history, setHistory] = useState<GeneratedVideo[]>([]);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [hasVerifiedToken, setHasVerifiedToken] = useState(false);
+  const [tokenUsername, setTokenUsername] = useState<string | null>(null);
+
+  // Check token status on mount
+  useEffect(() => {
+    checkTokenStatus();
+  }, []);
+
+  const checkTokenStatus = async () => {
+    try {
+      const clientTok = apiClient.getClientToken();
+      if (clientTok) {
+        const res = await apiClient.verifyToken(clientTok);
+        if (res.valid) {
+          setHasVerifiedToken(true);
+          setTokenUsername(res.username || null);
+          return;
+        }
+      }
+      const cfg = await apiClient.getServerConfig();
+      if (cfg.hasHfToken) {
+        setHasVerifiedToken(true);
+      }
+    } catch {}
+  };
 
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -146,6 +171,10 @@ export const LTXVideoGenerator: React.FC = () => {
         aspectRatio,
         resolution,
         cameraMovement: cameraMotion,
+        onProgress: (stage: string) => {
+          setProgressStage(stage);
+          setProgressPercent(prev => Math.min(95, prev + 15));
+        },
       });
 
       clearTimeout(timer1);
@@ -202,12 +231,27 @@ export const LTXVideoGenerator: React.FC = () => {
       {/* Top Banner */}
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-blue-950/60 via-slate-900 to-indigo-950/60 border border-blue-800/30 p-6 md:p-8 shadow-xl">
         <div className="max-w-3xl space-y-2">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-semibold">
-            <Zap className="w-3.5 h-3.5 text-blue-400" />
-            <span>Turnkey LTX AI Video Engine • No Tokens Needed for End-Users</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold border ${
+              hasVerifiedToken
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                : 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+            }`}>
+              <Zap className="w-3.5 h-3.5" />
+              <span>
+                {hasVerifiedToken
+                  ? `Hugging Face ZeroGPU Active (${tokenUsername ? `@${tokenUsername}` : 'Authenticated'})`
+                  : 'Free Camera Motion Mode Active'}
+              </span>
+            </div>
+            {!hasVerifiedToken && (
+              <span className="text-xs text-slate-400">
+                Tip: Click <strong>"Cloud Engine"</strong> in the top header to test & connect your Hugging Face token for real AI diffusion.
+              </span>
+            )}
           </div>
           <h2 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight">
-            Generate Cinematic Moving Video in Seconds
+            Generate Cinematic AI Video in Seconds
           </h2>
           <p className="text-sm text-slate-300 leading-relaxed">
             Enter any visual scene or story concept. The system runs real frame-by-frame generative motion with dynamic camera angles, cinematic volumetric lighting, and 24 FPS MP4 playback.

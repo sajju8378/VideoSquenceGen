@@ -375,6 +375,42 @@ apiRouter.post('/config', (req: Request, res: Response) => {
   }
 });
 
+// 14.1 Token Verification Endpoint (Tests token directly with Hugging Face API)
+apiRouter.post('/verify-token', async (req: Request, res: Response) => {
+  try {
+    const candidateToken = req.body.token?.trim() || getServerConfig().hf_token?.trim();
+    if (!candidateToken) {
+      return res.status(400).json({ valid: false, error: 'No token provided' });
+    }
+
+    const hfRes = await fetch('https://huggingface.co/api/whoami-v2', {
+      headers: {
+        Authorization: `Bearer ${candidateToken}`,
+      },
+    });
+
+    if (hfRes.ok) {
+      const data = await hfRes.json();
+      return res.json({
+        valid: true,
+        username: data.name,
+        fullname: data.fullname,
+        email: data.email,
+        type: data.type || 'user',
+        canPay: !!data.canPay,
+      });
+    } else {
+      const errData = await hfRes.json().catch(() => ({}));
+      return res.json({
+        valid: false,
+        error: errData.error || `Hugging Face rejected token (Status: ${hfRes.status})`,
+      });
+    }
+  } catch (err: any) {
+    res.status(500).json({ valid: false, error: err.message });
+  }
+});
+
 // 15. Turnkey LTX Direct Video Generator Endpoint (Zero Token Needed for End Users!)
 apiRouter.post('/generate-single-video', async (req: Request, res: Response) => {
   try {

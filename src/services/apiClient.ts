@@ -21,6 +21,96 @@ export async function checkBackendAvailability(): Promise<boolean> {
 // Client-side local storage fallback for static deployments (e.g. GitHub Pages)
 const LOCAL_STORAGE_KEY_JOBS = 'wanscript_jobs_v1';
 const LOCAL_STORAGE_KEY_LOGS = 'wanscript_logs_v1';
+const LOCAL_STORAGE_KEY_HF_TOKEN = 'wanscript_hf_token';
+const LOCAL_STORAGE_KEY_HF_SPACE = 'wanscript_hf_space';
+
+export function getClientHfToken(): string {
+  try {
+    return localStorage.getItem(LOCAL_STORAGE_KEY_HF_TOKEN) || '';
+  } catch {
+    return '';
+  }
+}
+
+export function setClientHfToken(token: string): void {
+  try {
+    if (token && token.trim().length > 0) {
+      localStorage.setItem(LOCAL_STORAGE_KEY_HF_TOKEN, token.trim());
+    } else {
+      localStorage.removeItem(LOCAL_STORAGE_KEY_HF_TOKEN);
+    }
+  } catch {}
+}
+
+export function getClientHfSpace(): string {
+  try {
+    return localStorage.getItem(LOCAL_STORAGE_KEY_HF_SPACE) || 'Lightricks/ltx-video-distilled';
+  } catch {
+    return 'Lightricks/ltx-video-distilled';
+  }
+}
+
+export function setClientHfSpace(space: string): void {
+  try {
+    localStorage.setItem(LOCAL_STORAGE_KEY_HF_SPACE, space.trim());
+  } catch {}
+}
+
+export async function generateClientHfVideo(
+  prompt: string,
+  token?: string,
+  spaceName: string = 'Lightricks/ltx-video-distilled',
+  aspectRatio: '16:9' | '9:16' | '1:1' = '16:9',
+  duration: number = 4,
+  onProgress?: (status: string) => void
+): Promise<string> {
+  onProgress?.(`Connecting browser to Hugging Face Space: ${spaceName}...`);
+  const { Client } = await import('@gradio/client');
+  const client = await Client.connect(spaceName, {
+    hf_token: token ? (token as `hf_${string}`) : undefined,
+  });
+
+  onProgress?.('Connected to Space! Requesting GPU allocation on ZeroGPU...');
+
+  const is916 = aspectRatio === '9:16';
+  const is11 = aspectRatio === '1:1';
+  let width = 704;
+  let height = 512;
+  if (is916) {
+    width = 512;
+    height = 704;
+  } else if (is11) {
+    width = 512;
+    height = 512;
+  }
+
+  onProgress?.('Generating video diffusion frames with LTX-Video...');
+
+  const result = await (client.predict as any)('/generate_video', {
+    prompt: prompt,
+    negative_prompt: 'worst quality, inconsistent motion, blurry, jittery, distorted, cartoon, low resolution',
+    input_image_filepath: null,
+    height_ui: height,
+    width_ui: width,
+    duration_ui: Math.max(2, Math.min(8, duration)),
+    seed_ui: Math.floor(Math.random() * 100000),
+    randomize_seed: true,
+    ui_guidance_scale: 3.0,
+    improve_texture_flag: true,
+  });
+
+  if (result && result.data && result.data[0]) {
+    const v = result.data[0];
+    const videoUrl = typeof v === 'string' ? v : v?.video?.url || v?.url;
+    if (videoUrl) {
+      onProgress?.('Video generation completed! Downloading MP4 stream...');
+      return videoUrl;
+    }
+  }
+
+  throw new Error('Hugging Face Space completed but returned no video stream.');
+}
+
 
 // In-memory queue cancellation and abort control tracking
 const activeAbortControllers: Map<string, AbortController> = new Map();
@@ -1392,6 +1482,81 @@ export const apiClient = {
     return res.json();
   },
 
+  async verifyToken(token?: string): Promise<{
+    valid: boolean;
+    username?: string;
+    fullname?: string;
+    email?: string;
+    type?: string;
+    error?: string;
+  }> {
+    const candidate = token?.trim() || getClientHfToken();
+    if (!candidate) {
+      return { valid: false, error: 'Please enter a Hugging Face token to test' };
+    }
+
+    // First try via backend if available
+    const hasBackend = await checkBackendAvailability();
+    if (hasBackend) {
+      try {
+        const res = await fetch('/api/verify-token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: candidate }),
+        });
+        if (res.ok) {
+          return res.json();
+        }
+      } catch {}
+    }
+
+    // Direct client fetch (works on static GitHub Pages with CORS!)
+    try {
+      const res = await fetch('https://huggingface.co/api/whoami-v2', {
+        headers: {
+          Authorization: `Bearer ${candidate}`,
+        },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return {
+          valid: true,
+          username: data.name,
+          fullname: data.fullname,
+          email: data.email,
+          type: data.type || 'user',
+        };
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        return {
+          valid: false,
+          error: errData.error || `Hugging Face rejected token (HTTP ${res.status})`,
+        };
+      }
+    } catch (err: any) {
+      return {
+        valid: false,
+        error: `Could not reach Hugging Face: ${err.message}`,
+      };
+    }
+  },
+
+  getClientToken(): string {
+    return getClientHfToken();
+  },
+
+  setClientToken(token: string): void {
+    setClientHfToken(token);
+  },
+
+  getClientSpace(): string {
+    return getClientHfSpace();
+  },
+
+  setClientSpace(space: string): void {
+    setClientHfSpace(space);
+  },
+
   async generateDirectVideo(params: {
     prompt: string;
     duration?: number;
@@ -1399,6 +1564,7 @@ export const apiClient = {
     resolution?: string;
     cameraMovement?: string;
     imageUrl?: string;
+    onProgress?: (msg: string) => void;
   }): Promise<{
     success: boolean;
     videoUrl: string;
@@ -1409,6 +1575,7 @@ export const apiClient = {
   }> {
     const hasBackend = await checkBackendAvailability();
     if (hasBackend) {
+      params.onProgress?.('Connecting to Backend Video Engine...');
       const res = await fetch('/api/generate-single-video', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1421,8 +1588,40 @@ export const apiClient = {
       return res.json();
     }
 
-    // Static fallback for browser-only execution (e.g. GitHub Pages)
+    // Running on static host (e.g. GitHub Pages)
     const ratio = (params.aspectRatio as '16:9' | '9:16' | '1:1') || '16:9';
+    const clientToken = getClientHfToken();
+    const clientSpace = getClientHfSpace();
+
+    // If client token is configured, connect to Hugging Face ZeroGPU Space directly!
+    if (clientToken) {
+      try {
+        params.onProgress?.(`Connecting browser to Hugging Face Space: ${clientSpace}...`);
+        const videoUrl = await generateClientHfVideo(
+          params.prompt,
+          clientToken,
+          clientSpace,
+          ratio,
+          params.duration || 4,
+          params.onProgress
+        );
+
+        return {
+          success: true,
+          videoUrl,
+          filename: `hf_gradio_${Date.now()}.mp4`,
+          engineUsed: 'huggingface_zerogpu',
+          duration: params.duration || 4,
+          aspectRatio: ratio,
+        };
+      } catch (err: any) {
+        console.warn('Browser Hugging Face generation error:', err);
+        params.onProgress?.(`HF Space notice: ${err.message}. Falling back to visual keyframe engine...`);
+      }
+    }
+
+    // Accelerated client motion synthesis fallback
+    params.onProgress?.('Rendering 24 FPS motion clip in browser...');
     const clipUrl = await generateClientVideoClip(
       params.prompt,
       params.duration || 5.0,
