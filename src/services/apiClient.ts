@@ -22,10 +22,41 @@ export async function checkBackendAvailability(): Promise<boolean> {
 const LOCAL_STORAGE_KEY_JOBS = 'wanscript_jobs_v1';
 const LOCAL_STORAGE_KEY_LOGS = 'wanscript_logs_v1';
 
+// In-memory queue cancellation and abort control tracking
+const activeAbortControllers: Map<string, AbortController> = new Map();
+const cancelledQueueJobIds: Set<string> = new Set();
+
 function getStoredJobs(): Job[] {
   try {
     const data = localStorage.getItem(LOCAL_STORAGE_KEY_JOBS);
-    return data ? JSON.parse(data) : [];
+    if (!data) return [];
+    const jobs: Job[] = JSON.parse(data);
+
+    // Auto-heal orphaned 'generating' scenes or stuck locks upon reload
+    let modified = false;
+    for (const job of jobs) {
+      if (job.scenes) {
+        for (const scene of job.scenes) {
+          if (scene.status === 'generating') {
+            scene.status = 'pending';
+            scene.last_error = 'Auto-recovered to pending upon reload.';
+            modified = true;
+          }
+        }
+      }
+      if (job.gpuLockActive) {
+        job.gpuLockActive = false;
+        job.currentVramMb = 850;
+        if (job.status === 'processing') {
+          job.status = job.scenes?.some(s => s.status === 'done') ? 'queued' : 'draft';
+        }
+        modified = true;
+      }
+    }
+    if (modified) {
+      saveStoredJobs(jobs);
+    }
+    return jobs;
   } catch {
     return [];
   }
@@ -140,8 +171,11 @@ async function loadDiffusionImageViaBlob(
   promptText: string,
   width: number,
   height: number,
-  seed: number
+  seed: number,
+  signal?: AbortSignal
 ): Promise<HTMLImageElement | null> {
+  if (signal?.aborted) return null;
+
   const cleanSubject = promptText
     .replace(/^cinematic wan 2\.1 video of:?/i, '')
     .replace(/wan 2\.1/gi, '')
@@ -157,11 +191,17 @@ async function loadDiffusionImageViaBlob(
   ];
 
   for (const url of urls) {
+    if (signal?.aborted) return null;
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 14000);
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
+      const onAbort = () => controller.abort();
+      signal?.addEventListener('abort', onAbort);
+
       const res = await fetch(url, { signal: controller.signal });
       clearTimeout(timeoutId);
+      signal?.removeEventListener('abort', onAbort);
+
       if (res.ok) {
         const blob = await res.blob();
         if (blob.size > 1000) {
@@ -182,6 +222,8 @@ async function loadDiffusionImageViaBlob(
     }
   }
 
+  if (signal?.aborted) return null;
+
   // Fallback direct image load if fetch is blocked
   try {
     const directImg = new Image();
@@ -190,7 +232,7 @@ async function loadDiffusionImageViaBlob(
     await new Promise<void>(resolve => {
       directImg.onload = () => resolve();
       directImg.onerror = () => resolve();
-      setTimeout(resolve, 8000);
+      setTimeout(resolve, 3000);
     });
     if (directImg.complete && directImg.naturalWidth > 0) {
       return directImg;
@@ -340,8 +382,11 @@ async function generateClientVideoClip(
   aspectRatio: '16:9' | '9:16' | '1:1',
   sceneIndex: number = 0,
   narrationText: string = '',
-  customImageUrl?: string
+  customImageUrl?: string,
+  signal?: AbortSignal
 ): Promise<string> {
+  if (signal?.aborted) return '';
+
   // True High-Definition canvas dimensions (1280x720 for 720p, 1920x1080 for 1080p)
   const is1080p = resolution === '1080p';
   const width = aspectRatio === '9:16' ? (is1080p ? 720 : 540) : aspectRatio === '1:1' ? (is1080p ? 1080 : 720) : (is1080p ? 1920 : 1280);
@@ -364,7 +409,7 @@ async function generateClientVideoClip(
       if (img!.complete && img!.naturalWidth > 0) return resolve();
       img!.onload = () => resolve();
       img!.onerror = () => resolve();
-      setTimeout(resolve, 8000);
+      setTimeout(resolve, 3000);
     });
   } else {
     // 2. Otherwise load via modern diffusion pipeline
@@ -372,12 +417,14 @@ async function generateClientVideoClip(
     if (sceneImageCache.has(cacheKey) && sceneImageCache.get(cacheKey)!.complete && sceneImageCache.get(cacheKey)!.naturalWidth > 0) {
       img = sceneImageCache.get(cacheKey)!;
     } else {
-      img = await loadDiffusionImageViaBlob(text, width, height, seed);
+      img = await loadDiffusionImageViaBlob(text, width, height, seed, signal);
       if (img) {
         sceneImageCache.set(cacheKey, img);
       }
     }
   }
+
+  if (signal?.aborted) return '';
 
   const canvas = document.createElement('canvas');
   canvas.width = width;
@@ -535,6 +582,20 @@ async function generateClientVideoClip(
     recorder.onstop = finish;
     recorder.onerror = finish;
 
+    if (signal?.aborted) {
+      finish();
+      return;
+    }
+
+    const onAbort = () => {
+      clearInterval(interval);
+      try {
+        if (recorder.state === 'recording') recorder.stop();
+      } catch {}
+      finish();
+    };
+    signal?.addEventListener('abort', onAbort);
+
     try {
       recorder.start(100);
     } catch {
@@ -546,6 +607,15 @@ async function generateClientVideoClip(
     let currentFrame = 0;
 
     const interval = setInterval(() => {
+      if (signal?.aborted) {
+        clearInterval(interval);
+        try {
+          if (recorder.state === 'recording') recorder.stop();
+        } catch {}
+        finish();
+        return;
+      }
+
       currentFrame++;
       const progress = Math.min(1.0, currentFrame / totalFrames);
       drawSceneVisual(progress);
@@ -771,6 +841,10 @@ export const apiClient = {
     }
 
     // Static client execution: run sequential scenes with real state transitions
+    cancelledQueueJobIds.delete(jobId);
+    const abortController = new AbortController();
+    activeAbortControllers.set(jobId, abortController);
+
     const jobs = getStoredJobs();
     const job = jobs.find(j => j.id === jobId);
     if (!job || !job.scenes) return;
@@ -786,25 +860,81 @@ export const apiClient = {
     const scenesToProcess = job.scenes;
 
     (async () => {
-      for (const scene of scenesToProcess) {
-        if (scene.status === 'done') continue;
+      try {
+        for (const scene of scenesToProcess) {
+          if (cancelledQueueJobIds.has(job.id) || abortController.signal.aborted) {
+            break;
+          }
+          if (scene.status === 'done') continue;
 
-        // Acquire lock
-        job.gpuLockActive = true;
-        scene.status = 'generating';
-        scene.attempt_count++;
-        job.currentVramMb = 16360;
-        saveStoredJobs(jobs);
-        this.notifyUpdate(job.id);
-
-        const delay = simulation?.acceleratedSpeed ? 600 : 1200;
-        await new Promise(r => setTimeout(r, delay));
-
-        // Edge case simulations
-        if (simulation?.simulateOOMOnSceneIndex === scene.scene_index && scene.attempt_count === 1) {
-          scene.last_error = 'CUDA out of memory during backward pass. Attempting 480p auto-downgrade.';
+          // Acquire lock
+          job.gpuLockActive = true;
           scene.status = 'generating';
-          scene.resolution = '480p';
+          scene.attempt_count++;
+          job.currentVramMb = 16360;
+          saveStoredJobs(jobs);
+          this.notifyUpdate(job.id);
+
+          const delay = simulation?.acceleratedSpeed ? 400 : 800;
+          await new Promise(r => setTimeout(r, delay));
+
+          if (cancelledQueueJobIds.has(job.id) || abortController.signal.aborted) {
+            scene.status = 'pending';
+            scene.last_error = 'Stopped by user.';
+            break;
+          }
+
+          // Edge case simulations
+          if (simulation?.simulateOOMOnSceneIndex === scene.scene_index && scene.attempt_count === 1) {
+            scene.last_error = 'CUDA out of memory during backward pass. Attempting 480p auto-downgrade.';
+            scene.status = 'generating';
+            scene.resolution = '480p';
+            appendStoredLog(job.id, {
+              id: 'log_' + Math.random().toString(36).substring(2, 8),
+              job_id: job.id,
+              scene_id: scene.id,
+              timestamp: new Date().toISOString(),
+              vram_before_mb: 850,
+              vram_after_mb: 850,
+              vram_peak_mb: 16384,
+              duration_ms: delay,
+              outcome: 'OOM_RETRY',
+              details: 'OOM caught! Auto-downgraded to 480p and cleared GPU memory via finally block.',
+            });
+            this.notifyUpdate(job.id);
+            await new Promise(r => setTimeout(r, 400));
+          }
+
+          // Generate dynamic video clip for client
+          let clipUrl = '';
+          try {
+            clipUrl = await generateClientVideoClip(
+              scene.visual_prompt,
+              scene.target_duration_seconds,
+              scene.resolution,
+              job.aspect_ratio,
+              scene.scene_index,
+              scene.narration_text,
+              scene.image_url || job.character_anchor_image || undefined,
+              abortController.signal
+            );
+          } catch (clipErr) {
+            console.warn('Clip generation encountered error:', clipErr);
+          }
+
+          if (cancelledQueueJobIds.has(job.id) || abortController.signal.aborted) {
+            scene.status = 'pending';
+            scene.last_error = 'Stopped by user.';
+            break;
+          }
+
+          scene.status = 'done';
+          scene.output_path = clipUrl;
+          scene.last_error = null;
+
+          // GPU memory hygiene (release to 850MB)
+          job.currentVramMb = 850;
+
           appendStoredLog(job.id, {
             id: 'log_' + Math.random().toString(36).substring(2, 8),
             job_id: job.id,
@@ -812,55 +942,131 @@ export const apiClient = {
             timestamp: new Date().toISOString(),
             vram_before_mb: 850,
             vram_after_mb: 850,
-            vram_peak_mb: 16384,
+            vram_peak_mb: 14200,
             duration_ms: delay,
-            outcome: 'OOM_RETRY',
-            details: 'OOM caught! Auto-downgraded to 480p and cleared GPU memory via finally block.',
+            outcome: 'SUCCESS',
+            details: `Generated ${scene.resolution} clip successfully. GPU memory cleared to 850MB.`,
           });
+
+          saveStoredJobs(jobs);
           this.notifyUpdate(job.id);
-          await new Promise(r => setTimeout(r, 600));
         }
-
-        // Generate dynamic video clip for client
-        const clipUrl = await generateClientVideoClip(
-          scene.visual_prompt,
-          scene.target_duration_seconds,
-          scene.resolution,
-          job.aspect_ratio,
-          scene.scene_index,
-          scene.narration_text,
-          scene.image_url || job.character_anchor_image || undefined
-        );
-
-        scene.status = 'done';
-        scene.output_path = clipUrl;
-        scene.last_error = null;
-
-        // GPU memory hygiene (release to 850MB)
+      } finally {
+        activeAbortControllers.delete(job.id);
+        job.gpuLockActive = false;
         job.currentVramMb = 850;
 
-        appendStoredLog(job.id, {
-          id: 'log_' + Math.random().toString(36).substring(2, 8),
-          job_id: job.id,
-          scene_id: scene.id,
-          timestamp: new Date().toISOString(),
-          vram_before_mb: 850,
-          vram_after_mb: 850,
-          vram_peak_mb: 14200,
-          duration_ms: delay,
-          outcome: 'SUCCESS',
-          details: `Generated ${scene.resolution} clip successfully. GPU memory cleared to 850MB.`,
-        });
+        // Reset any scenes that were left in generating state
+        if (job.scenes) {
+          for (const s of job.scenes) {
+            if (s.status === 'generating') {
+              s.status = 'pending';
+              s.last_error = 'Process stopped or reset.';
+            }
+          }
+          if (job.scenes.every(s => s.status === 'done')) {
+            job.status = 'completed';
+          } else {
+            job.status = 'queued';
+          }
+        }
 
         saveStoredJobs(jobs);
         this.notifyUpdate(job.id);
       }
-
-      job.status = 'completed';
-      job.gpuLockActive = false;
-      saveStoredJobs(jobs);
-      this.notifyUpdate(job.id);
     })();
+  },
+
+  async stopJobQueue(jobId: string): Promise<void> {
+    cancelledQueueJobIds.add(jobId);
+    const controller = activeAbortControllers.get(jobId);
+    if (controller) {
+      try {
+        controller.abort();
+      } catch {}
+      activeAbortControllers.delete(jobId);
+    }
+
+    const hasBackend = await checkBackendAvailability();
+    if (hasBackend) {
+      try {
+        await fetch(`/api/jobs/${jobId}/stop`, { method: 'POST' });
+      } catch {}
+    }
+
+    const jobs = getStoredJobs();
+    const job = jobs.find(j => j.id === jobId);
+    if (job) {
+      job.gpuLockActive = false;
+      job.currentVramMb = 850;
+      job.status = job.scenes?.some(s => s.status === 'done') ? 'queued' : 'draft';
+      if (job.scenes) {
+        for (const s of job.scenes) {
+          if (s.status === 'generating') {
+            s.status = 'pending';
+            s.last_error = 'Generation stopped by user.';
+          }
+        }
+      }
+      saveStoredJobs(jobs);
+    }
+    this.notifyUpdate(jobId);
+  },
+
+  async resetGpuLock(jobId?: string): Promise<void> {
+    if (jobId) {
+      cancelledQueueJobIds.add(jobId);
+      const controller = activeAbortControllers.get(jobId);
+      if (controller) {
+        try {
+          controller.abort();
+        } catch {}
+        activeAbortControllers.delete(jobId);
+      }
+    }
+
+    const hasBackend = await checkBackendAvailability();
+    if (hasBackend && jobId) {
+      try {
+        await fetch(`/api/jobs/${jobId}/reset-lock`, { method: 'POST' });
+      } catch {}
+    }
+
+    const jobs = getStoredJobs();
+    for (const j of jobs) {
+      if (!jobId || j.id === jobId) {
+        j.gpuLockActive = false;
+        j.currentVramMb = 850;
+        if (j.status === 'processing') {
+          j.status = j.scenes?.some(s => s.status === 'done') ? 'queued' : 'draft';
+        }
+        if (j.scenes) {
+          for (const s of j.scenes) {
+            if (s.status === 'generating') {
+              s.status = 'pending';
+              s.last_error = 'GPU lock force-reset.';
+            }
+          }
+        }
+      }
+    }
+    saveStoredJobs(jobs);
+    this.notifyUpdate(jobId);
+  },
+
+  async skipScene(jobId: string, sceneId: string): Promise<void> {
+    await this.stopJobQueue(jobId);
+    const jobs = getStoredJobs();
+    const job = jobs.find(j => j.id === jobId);
+    if (job?.scenes) {
+      const scene = job.scenes.find(s => s.id === sceneId);
+      if (scene) {
+        scene.status = 'failed';
+        scene.last_error = 'Skipped by user';
+        saveStoredJobs(jobs);
+      }
+    }
+    this.notifyUpdate(jobId);
   },
 
   notifyUpdate(jobId?: string) {
@@ -896,61 +1102,84 @@ export const apiClient = {
     const scene = job.scenes.find(s => s.id === sceneId);
     if (!scene) throw new Error('Scene not found');
 
-    // 1. Acquire GPU lock & transition to generating
-    scene.status = 'generating';
-    if (forcedResolution) scene.resolution = forcedResolution;
-    scene.attempt_count++;
-    job.status = 'processing';
-    job.gpuLockActive = true;
-    job.currentVramMb = 16360;
-    saveStoredJobs(jobs);
-    this.notifyUpdate(jobId);
+    cancelledQueueJobIds.delete(jobId);
+    const abortController = new AbortController();
+    activeAbortControllers.set(jobId, abortController);
 
-    // Warm up the next scene's visual in background while this one generates!
-    const nextScene = job.scenes.find(s => s.scene_index === scene.scene_index + 1);
-    if (nextScene) {
-      prefetchSceneVisual(nextScene.visual_prompt, job.aspect_ratio, nextScene.scene_index);
+    try {
+      // 1. Acquire GPU lock & transition to generating
+      scene.status = 'generating';
+      if (forcedResolution) scene.resolution = forcedResolution;
+      scene.attempt_count++;
+      job.status = 'processing';
+      job.gpuLockActive = true;
+      job.currentVramMb = 16360;
+      saveStoredJobs(jobs);
+      this.notifyUpdate(jobId);
+
+      // Warm up the next scene's visual in background while this one generates!
+      const nextScene = job.scenes.find(s => s.scene_index === scene.scene_index + 1);
+      if (nextScene) {
+        prefetchSceneVisual(nextScene.visual_prompt, job.aspect_ratio, nextScene.scene_index);
+      }
+
+      // 2. Generate video clip
+      let clipUrl = '';
+      try {
+        clipUrl = await generateClientVideoClip(
+          scene.visual_prompt,
+          scene.target_duration_seconds,
+          scene.resolution,
+          job.aspect_ratio,
+          scene.scene_index,
+          scene.narration_text,
+          scene.image_url || job.character_anchor_image || undefined,
+          abortController.signal
+        );
+      } catch (err) {
+        console.warn('Single scene generation caught error:', err);
+      }
+
+      if (cancelledQueueJobIds.has(jobId) || abortController.signal.aborted) {
+        scene.status = 'pending';
+        scene.last_error = 'Stopped by user.';
+      } else {
+        // 3. Mark complete
+        scene.status = 'done';
+        scene.output_path = clipUrl;
+        scene.last_error = null;
+
+        appendStoredLog(job.id, {
+          id: 'log_' + Math.random().toString(36).substring(2, 8),
+          job_id: job.id,
+          scene_id: scene.id,
+          timestamp: new Date().toISOString(),
+          vram_before_mb: 850,
+          vram_after_mb: 850,
+          vram_peak_mb: 14200,
+          duration_ms: 1200,
+          outcome: 'SUCCESS',
+          details: `Generated ${scene.resolution} video clip for Scene ${scene.scene_index + 1}. GPU lock released.`,
+        });
+      }
+    } finally {
+      activeAbortControllers.delete(jobId);
+      job.gpuLockActive = false;
+      job.currentVramMb = 850;
+
+      if (scene.status === 'generating') {
+        scene.status = 'pending';
+      }
+
+      if (job.scenes.every(s => s.status === 'done')) {
+        job.status = 'completed';
+      } else {
+        job.status = 'queued';
+      }
+
+      saveStoredJobs(jobs);
+      this.notifyUpdate(jobId);
     }
-
-    // 2. Generate video clip
-    const clipUrl = await generateClientVideoClip(
-      scene.visual_prompt,
-      scene.target_duration_seconds,
-      scene.resolution,
-      job.aspect_ratio,
-      scene.scene_index,
-      scene.narration_text,
-      scene.image_url || job.character_anchor_image || undefined
-    );
-
-    // 3. Mark complete & release GPU lock
-    scene.status = 'done';
-    scene.output_path = clipUrl;
-    scene.last_error = null;
-    job.gpuLockActive = false;
-    job.currentVramMb = 850;
-
-    if (job.scenes.every(s => s.status === 'done')) {
-      job.status = 'completed';
-    } else {
-      job.status = 'queued';
-    }
-
-    appendStoredLog(job.id, {
-      id: 'log_' + Math.random().toString(36).substring(2, 8),
-      job_id: job.id,
-      scene_id: scene.id,
-      timestamp: new Date().toISOString(),
-      vram_before_mb: 850,
-      vram_after_mb: 850,
-      vram_peak_mb: 14200,
-      duration_ms: 1200,
-      outcome: 'SUCCESS',
-      details: `Generated ${scene.resolution} video clip for Scene ${scene.scene_index + 1}. GPU lock released.`,
-    });
-
-    saveStoredJobs(jobs);
-    this.notifyUpdate(jobId);
 
     return { job, scene };
   },

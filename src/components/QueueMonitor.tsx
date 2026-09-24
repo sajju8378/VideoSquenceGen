@@ -17,7 +17,10 @@ import {
   ChevronUp,
   Check,
   Video,
-  Timer
+  Timer,
+  Square,
+  SkipForward,
+  Unlock
 } from 'lucide-react';
 import type { Job, Scene } from '../types.ts';
 import { apiClient, downloadVideoFile } from '../services/apiClient.ts';
@@ -34,12 +37,13 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
   onSelectScenePreview,
 }) => {
   const [isStartingQueue, setIsStartingQueue] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
   const [generatingSceneId, setGeneratingSceneId] = useState<string | null>(null);
   const [retryingSceneId, setRetryingSceneId] = useState<string | null>(null);
   const [expandedPreviewSceneId, setExpandedPreviewSceneId] = useState<string | null>(null);
 
-  // Auto-advance pipeline state
-  const [autoAdvance, setAutoAdvance] = useState<boolean>(true);
+  // Auto-advance pipeline state: Default to false so user has full control and doesn't get stuck in auto-loop
+  const [autoAdvance, setAutoAdvance] = useState<boolean>(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const countdownTimerRef = useRef<any>(null);
 
@@ -171,6 +175,48 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
       console.error('Failed to start queue:', err);
     } finally {
       setIsStartingQueue(false);
+    }
+  };
+
+  const handleStopQueue = async () => {
+    setIsStopping(true);
+    cancelAutoAdvance();
+    try {
+      await apiClient.stopJobQueue(job.id);
+      onRefreshJob();
+    } catch (err) {
+      console.error('Failed to stop queue:', err);
+    } finally {
+      setIsStopping(false);
+      setGeneratingSceneId(null);
+    }
+  };
+
+  const handleResetGpuLock = async () => {
+    setIsStopping(true);
+    cancelAutoAdvance();
+    try {
+      await apiClient.resetGpuLock(job.id);
+      onRefreshJob();
+    } catch (err) {
+      console.error('Failed to reset GPU lock:', err);
+    } finally {
+      setIsStopping(false);
+      setGeneratingSceneId(null);
+    }
+  };
+
+  const handleSkipScene = async (sceneId: string) => {
+    setIsStopping(true);
+    cancelAutoAdvance();
+    try {
+      await apiClient.skipScene(job.id, sceneId);
+      onRefreshJob();
+    } catch (err) {
+      console.error('Failed to skip scene:', err);
+    } finally {
+      setIsStopping(false);
+      setGeneratingSceneId(null);
     }
   };
 
@@ -374,43 +420,79 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
               </button>
             )}
 
-            {/* If next pending scene exists and no countdown is active */}
-            {countdown === null && nextPendingScene && (
-              <button
-                onClick={() => handleGenerateSingle(nextPendingScene.id)}
-                disabled={isGpuBusy}
-                className="px-5 py-2.5 rounded-xl font-bold text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 flex items-center gap-2 shadow-xl shadow-blue-600/30 transition cursor-pointer"
-              >
-                {isGpuBusy ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>Synthesizing Video...</span>
-                  </>
-                ) : nextPendingScene.scene_index === 0 ? (
-                  <>
-                    <Play className="w-4 h-4 fill-white" />
-                    <span>Generate Video 1 Now</span>
-                  </>
-                ) : (
-                  <>
-                    <ArrowRight className="w-4 h-4" />
-                    <span>Proceed to Generate Video {nextPendingScene.scene_index + 1}</span>
-                  </>
+            {/* When GPU is busy generating a scene: Provide Stop, Skip, and Reset controls */}
+            {isGpuBusy && (
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-blue-950/60 border border-blue-500/40 text-xs font-semibold text-blue-300">
+                  <RefreshCw className="w-4 h-4 animate-spin text-blue-400" />
+                  <span>Synthesizing Video {activeGeneratingScene ? activeGeneratingScene.scene_index + 1 : ''}...</span>
+                </div>
+
+                <button
+                  onClick={handleStopQueue}
+                  disabled={isStopping}
+                  className="px-4 py-2.5 rounded-xl font-bold text-xs text-rose-200 bg-rose-950/90 hover:bg-rose-900 border border-rose-500/50 flex items-center gap-2 shadow-lg shadow-rose-950/60 transition cursor-pointer"
+                  title="Immediately stop sequential generation and release GPU lock"
+                >
+                  <Square className="w-3.5 h-3.5 fill-rose-400 text-rose-400" />
+                  <span>{isStopping ? 'Stopping...' : 'Stop Generation'}</span>
+                </button>
+
+                {activeGeneratingScene && (
+                  <button
+                    onClick={() => handleSkipScene(activeGeneratingScene.id)}
+                    disabled={isStopping}
+                    className="px-3.5 py-2.5 rounded-xl font-medium text-xs text-amber-200 bg-amber-950/70 hover:bg-amber-900 border border-amber-500/40 flex items-center gap-1.5 transition cursor-pointer"
+                    title="Skip this scene and release lock"
+                  >
+                    <SkipForward className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Skip Scene</span>
+                  </button>
                 )}
-              </button>
+
+                <button
+                  onClick={handleResetGpuLock}
+                  disabled={isStopping}
+                  className="px-3 py-2.5 rounded-xl font-medium text-xs text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 flex items-center gap-1.5 transition cursor-pointer"
+                  title="Reset GPU lock and clear busy flag"
+                >
+                  <Unlock className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Reset Lock</span>
+                </button>
+              </div>
             )}
 
-            {/* Batch Auto-Advance Queue Option */}
-            {nextPendingScene && (
-              <button
-                onClick={handleStartQueue}
-                disabled={isStartingQueue || isGpuBusy}
-                className="px-4 py-2.5 rounded-xl font-medium text-xs text-slate-300 bg-slate-800 hover:bg-slate-750 hover:text-white disabled:opacity-50 border border-slate-700 flex items-center gap-2 transition cursor-pointer"
-                title="Automatically process all remaining scenes sequentially with GPU cleanup"
-              >
-                <Play className="w-3.5 h-3.5 text-slate-400" />
-                <span>Run All Sequentially</span>
-              </button>
+            {/* If next pending scene exists and no countdown or generation active */}
+            {!isGpuBusy && countdown === null && nextPendingScene && (
+              <>
+                <button
+                  onClick={() => handleGenerateSingle(nextPendingScene.id)}
+                  className="px-5 py-2.5 rounded-xl font-bold text-xs text-white bg-blue-600 hover:bg-blue-500 flex items-center gap-2 shadow-xl shadow-blue-600/30 transition cursor-pointer"
+                >
+                  {nextPendingScene.scene_index === 0 ? (
+                    <>
+                      <Play className="w-4 h-4 fill-white" />
+                      <span>Generate Video 1 Now</span>
+                    </>
+                  ) : (
+                    <>
+                      <ArrowRight className="w-4 h-4" />
+                      <span>Proceed to Generate Video {nextPendingScene.scene_index + 1}</span>
+                    </>
+                  )}
+                </button>
+
+                {/* Batch Sequential Queue Option */}
+                <button
+                  onClick={handleStartQueue}
+                  disabled={isStartingQueue}
+                  className="px-4 py-2.5 rounded-xl font-medium text-xs text-slate-300 bg-slate-800 hover:bg-slate-750 hover:text-white disabled:opacity-50 border border-slate-700 flex items-center gap-2 transition cursor-pointer"
+                  title="Process all remaining scenes sequentially with GPU cleanup"
+                >
+                  <Play className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Run All Sequentially</span>
+                </button>
+              </>
             )}
 
             {/* When all done, allow downloading all or restarting */}
@@ -639,6 +721,30 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
                     {getStatusBadge(scene)}
 
                     {/* ACTION BUTTONS FOR THIS SCENE */}
+
+                    {/* 0. If Generating: Direct Stop and Skip buttons */}
+                    {scene.status === 'generating' && (
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={handleStopQueue}
+                          disabled={isStopping}
+                          className="px-3 py-1.5 rounded-lg text-xs font-bold text-rose-200 bg-rose-950/80 hover:bg-rose-900 border border-rose-500/50 flex items-center gap-1.5 shadow-sm transition cursor-pointer"
+                          title={`Stop generating Video ${idx + 1}`}
+                        >
+                          <Square className="w-3.5 h-3.5 fill-rose-400 text-rose-400" />
+                          <span>{isStopping ? 'Stopping...' : 'Stop'}</span>
+                        </button>
+                        <button
+                          onClick={() => handleSkipScene(scene.id)}
+                          disabled={isStopping}
+                          className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-amber-200 bg-amber-950/70 hover:bg-amber-900 border border-amber-500/40 flex items-center gap-1 transition cursor-pointer"
+                          title={`Skip Video ${idx + 1}`}
+                        >
+                          <SkipForward className="w-3 h-3 text-amber-400" />
+                          <span>Skip</span>
+                        </button>
+                      </div>
+                    )}
 
                     {/* 1. If Pending: Direct "Generate Video N" button (Only disabled if GPU is currently busy) */}
                     {scene.status === 'pending' && (

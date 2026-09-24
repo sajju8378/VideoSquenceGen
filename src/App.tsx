@@ -17,7 +17,8 @@ import {
   RefreshCw,
   ShieldCheck,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Square
 } from 'lucide-react';
 
 export default function App() {
@@ -230,14 +231,29 @@ export default function App() {
 
       {/* Floating Status Bar for Ongoing Job */}
       {currentJob && (currentJob.gpuLockActive || currentJob.scenes?.some(s => s.status === 'generating')) && (
-        <div className="fixed bottom-4 right-4 z-40 bg-slate-900/95 border border-blue-500/40 rounded-2xl p-4 shadow-2xl backdrop-blur-md max-w-sm flex items-center gap-3 ring-1 ring-blue-500/20">
-          <RefreshCw className="w-5 h-5 text-blue-400 animate-spin shrink-0" />
-          <div className="text-xs">
-            <span className="font-bold text-white block">Sequential Queue Active</span>
-            <span className="text-slate-400 text-[11px]">
-              Generating scenes under single GPU lock. Memory is cleared after each call.
-            </span>
+        <div className="fixed bottom-4 right-4 z-40 bg-slate-900/95 border border-blue-500/40 rounded-2xl p-4 shadow-2xl backdrop-blur-md max-w-sm flex items-center justify-between gap-3 ring-1 ring-blue-500/20">
+          <div className="flex items-center gap-3">
+            <RefreshCw className="w-5 h-5 text-blue-400 animate-spin shrink-0" />
+            <div className="text-xs">
+              <span className="font-bold text-white block">Sequential Queue Active</span>
+              <span className="text-slate-400 text-[11px]">
+                Generating scenes under single GPU lock.
+              </span>
+            </div>
           </div>
+          <button
+            onClick={async () => {
+              if (currentJob) {
+                await apiClient.stopJobQueue(currentJob.id);
+                fetchActiveJob();
+              }
+            }}
+            className="px-3 py-1.5 rounded-lg bg-rose-950/80 hover:bg-rose-900 border border-rose-500/50 text-rose-300 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shrink-0"
+            title="Stop generation now"
+          >
+            <Square className="w-3.5 h-3.5 fill-rose-400 text-rose-400" />
+            <span>Stop</span>
+          </button>
         </div>
       )}
 
