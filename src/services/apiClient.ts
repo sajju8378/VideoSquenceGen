@@ -70,8 +70,127 @@ export function downloadVideoFile(url: string, filename: string) {
   document.body.removeChild(a);
 }
 
+// Robust Prompt Expander for Diffusion Models: Enforces explicit Character details, Background setup, and Photorealism
+export function generateDetailedDiffusionPrompt(
+  sentence: string,
+  userGenre?: string
+): string {
+  const clean = sentence.replace(/[.?!]+$/, '').trim();
+  const lower = clean.toLowerCase();
+
+  // 1. Mythological Epics: Lord Hanuman / Ramayana
+  if (
+    lower.includes('hanuman') ||
+    lower.includes('lanka') ||
+    lower.includes('ramayana') ||
+    lower.includes('sita') ||
+    lower.includes('vanara') ||
+    lower.includes('gada')
+  ) {
+    let actionState = 'soaring horizontally forward through the sky in a determined, heroic flight posture';
+    if (lower.includes('expand') || lower.includes('giant') || lower.includes('leap') || lower.includes('jump')) {
+      actionState = 'leaping into the sky, expanding into a colossal divine cosmic warrior form (Vishwaroopam)';
+    } else if (lower.includes('temple') || lower.includes('palace') || lower.includes('arrive') || lower.includes('citadel')) {
+      actionState = 'approaching the shores of Lanka from the golden sky, commanding presence with divine majesty';
+    }
+
+    return `Lord Hanuman, the divine Hindu warrior deity, towering muscular athletic physique, glowing golden-amber skin tone, wearing an ornate golden Mukut crown studded with jewels, sacred golden armlets and necklaces, billowing royal vermilion saffron silk dhoti fluttering fiercely in high-altitude winds, holding a heavy celestial golden Gada mace firmly in his powerful right hand, determined devoted heroic facial expression, ${actionState}. Background setup: vast dark-teal tumultuous ocean with crashing whitecap waves and oceanic spray below, distant volcanic island of Lanka with golden palace towers and glowing citadels on the horizon, dramatic golden-hour sunset sky with intense volumetric god rays breaking through heavy storm clouds. Cinematography: cinematic tracking side-angle shot, IMAX 70mm, Panavision anamorphic lens, epic atmospheric depth haze, hyper-realistic water droplets. Style: photorealistic live-action movie still, 8K resolution, Unreal Engine 5 render, cinematic lighting, masterwork, NOT cartoon, NOT anime, NOT comic, NOT 2D animation, NOT sketch, NOT bird caricature.`;
+  }
+
+  // 2. Cyberpunk / Futuristic Sci-Fi
+  if (
+    lower.includes('cyberpunk') ||
+    lower.includes('neon') ||
+    lower.includes('hacker') ||
+    lower.includes('cyborg') ||
+    lower.includes('drone') ||
+    lower.includes('operative')
+  ) {
+    return `Subject: Cyberpunk operative in high-tech carbon-fiber armored trench coat, glowing LED neural interface implants, reflective cybernetic visor, focused posture. Background setup: Rain-drenched futuristic megacity street, towering neon skyscrapers, holographic billboards reflecting on wet asphalt, steam rising from grates, flying hovercrafts in distance. Cinematography: Low-angle tracking cinematic camera, anamorphic blue horizontal lens flares, volumetric fog, Blade Runner 2049 aesthetic. Style: Photorealistic live-action film still, IMAX 70mm, 8k resolution, masterwork, NOT cartoon, NOT comic, NOT 2D animation.`;
+  }
+
+  // 3. Deep Sea / Oceanic Abyss
+  if (lower.includes('ocean') || lower.includes('reef') || lower.includes('submersible') || lower.includes('abyss') || lower.includes('marine')) {
+    return `Subject: Deep oceanic exploration. Background setup: Crystal-clear deep navy water, caustic sunlight patterns dancing across dramatic underwater rock arches, vibrant living coral reefs, schools of luminous marine life and floating bioluminescent embers. Cinematography: Underwater IMAX 70mm camera, smooth cinematic drift, volumetric sunbeams piercing the water. Style: BBC Earth National Geographic 8k photorealistic documentary film still, masterwork, NOT cartoon, NOT comic, NOT 2D.`;
+  }
+
+  // 4. Default / Custom Narrative
+  const genre = userGenre && !userGenre.toLowerCase().includes('cyberpunk')
+    ? userGenre
+    : 'Photorealistic Live-Action Epic, IMAX 70mm';
+
+  return `Cinematic scene depicting: ${clean}. Character details: Lifelike human subjects with realistic facial features, authentic muscle tone, detailed textured attire, expressive heroic posture and natural movement. Background setup: Expansive physical environment with authentic depth, foreground atmospheric haze, textured terrain, and detailed architecture on the horizon. Cinematography: Anamorphic 35mm lens, volumetric cinematic lighting, natural color grading, dynamic camera framing. Style: ${genre}, 8k resolution, IMAX film still, Unreal Engine 5 realism, masterwork, NOT cartoon, NOT comic book, NOT 2D animation, NOT sketch, photorealistic live-action film.`;
+}
+
 // In-memory cache for preloaded scene visual images
 const sceneImageCache = new Map<string, HTMLImageElement>();
+
+// Preload diffusion image using fetch + blob to prevent CORS failures
+async function loadDiffusionImageViaBlob(
+  promptText: string,
+  width: number,
+  height: number,
+  seed: number
+): Promise<HTMLImageElement | null> {
+  const cleanSubject = promptText
+    .replace(/^cinematic wan 2\.1 video of:?/i, '')
+    .replace(/wan 2\.1/gi, '')
+    .trim();
+
+  // If prompt is short, expand it into full cinematic instruction
+  const fullPrompt = cleanSubject.length > 50
+    ? cleanSubject
+    : generateDetailedDiffusionPrompt(cleanSubject);
+
+  const encodedPrompt = encodeURIComponent(fullPrompt);
+  const urls = [
+    `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&seed=${seed}&nologo=true`,
+    `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&seed=${seed}&model=flux&nologo=true`,
+  ];
+
+  for (const url of urls) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 14000);
+      const res = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (res.ok) {
+        const blob = await res.blob();
+        if (blob.size > 1000) {
+          const blobUrl = URL.createObjectURL(blob);
+          const img = new Image();
+          await new Promise<void>((resolve, reject) => {
+            img.onload = () => resolve();
+            img.onerror = () => reject();
+            img.src = blobUrl;
+          });
+          if (img.complete && img.naturalWidth > 0) {
+            return img;
+          }
+        }
+      }
+    } catch {
+      // Try next endpoint
+    }
+  }
+
+  // Fallback direct image load if fetch is blocked
+  try {
+    const directImg = new Image();
+    directImg.crossOrigin = 'anonymous';
+    directImg.src = urls[0];
+    await new Promise<void>(resolve => {
+      directImg.onload = () => resolve();
+      directImg.onerror = () => resolve();
+      setTimeout(resolve, 8000);
+    });
+    if (directImg.complete && directImg.naturalWidth > 0) {
+      return directImg;
+    }
+  } catch {}
+
+  return null;
+}
 
 export function prefetchSceneVisual(
   text: string,
@@ -80,297 +199,92 @@ export function prefetchSceneVisual(
 ) {
   const width = aspectRatio === '9:16' ? 405 : aspectRatio === '1:1' ? 512 : 720;
   const height = aspectRatio === '9:16' ? 720 : aspectRatio === '1:1' ? 512 : 405;
-  const cleanSubject = text
-    .replace(/^cinematic wan 2\.1 video of:?/i, '')
-    .replace(/wan 2\.1/gi, '')
-    .trim();
-  const enhancedVisualPrompt = `${cleanSubject}, cinematic photo, high detail 8k, epic volumetric lighting, masterwork composition`;
   const seed = Math.abs(text.split('').reduce((acc, c) => (acc * 33 + c.charCodeAt(0)) | 0, sceneIndex * 1337 + 7));
-  const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(enhancedVisualPrompt)}?width=${width}&height=${height}&seed=${seed}&nologo=true`;
-
   const cacheKey = `${text}_${sceneIndex}_${aspectRatio}`;
+
   if (!sceneImageCache.has(cacheKey)) {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.src = url;
-    sceneImageCache.set(cacheKey, img);
+    loadDiffusionImageViaBlob(text, width, height, seed).then(img => {
+      if (img) {
+        sceneImageCache.set(cacheKey, img);
+      }
+    });
   }
 }
 
-// Rich semantic animated cinematic painter if offline or while external diffusers synthesize
-function drawThematicCinematicIllustration(
+// Atmospheric scenic fallback (ONLY if completely offline) - pure cinematic lighting and waves, ZERO cartoon/geometric shapes
+function drawAtmosphericScenicFallback(
   ctx: CanvasRenderingContext2D,
   width: number,
   height: number,
-  progress: number,
-  promptText: string
+  progress: number
 ) {
-  const lower = promptText.toLowerCase();
-  const isHanumanOrOceanOrFlying =
-    lower.includes('hanuman') ||
-    lower.includes('ocean') ||
-    lower.includes('sea') ||
-    lower.includes('fly') ||
-    lower.includes('sky') ||
-    lower.includes('water');
+  // 1. Epic Twilight Sky
+  const skyGrad = ctx.createLinearGradient(0, 0, 0, height * 0.65);
+  skyGrad.addColorStop(0, '#040914');
+  skyGrad.addColorStop(0.35, '#0d1f38');
+  skyGrad.addColorStop(0.65, '#251b3a');
+  skyGrad.addColorStop(0.85, '#6e2b1e');
+  skyGrad.addColorStop(1, '#c25820');
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0, 0, width, height);
 
-  if (isHanumanOrOceanOrFlying) {
-    // 1. Epic Twilight / Storm Sky with volumetric light rays
-    const skyGrad = ctx.createLinearGradient(0, 0, 0, height * 0.7);
-    skyGrad.addColorStop(0, '#060d1d');
-    skyGrad.addColorStop(0.35, '#0f2444');
-    skyGrad.addColorStop(0.65, '#2e2547');
-    skyGrad.addColorStop(0.85, '#853e2b');
-    skyGrad.addColorStop(1, '#e07a38');
-    ctx.fillStyle = skyGrad;
-    ctx.fillRect(0, 0, width, height);
+  // Glowing Sun on horizon
+  const sunX = width * 0.7;
+  const sunY = height * 0.52;
+  const sunGrad = ctx.createRadialGradient(sunX, sunY, 5, sunX, sunY, width * 0.45);
+  sunGrad.addColorStop(0, 'rgba(255, 235, 170, 0.95)');
+  sunGrad.addColorStop(0.2, 'rgba(255, 140, 50, 0.5)');
+  sunGrad.addColorStop(0.6, 'rgba(180, 60, 20, 0.2)');
+  sunGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = sunGrad;
+  ctx.beginPath();
+  ctx.arc(sunX, sunY, width * 0.45, 0, Math.PI * 2);
+  ctx.fill();
 
-    // Glowing Sun / Divine Horizon Source
-    const sunX = width * 0.72;
-    const sunY = height * 0.52;
-    const sunGrad = ctx.createRadialGradient(sunX, sunY, 5, sunX, sunY, width * 0.5);
-    sunGrad.addColorStop(0, 'rgba(255, 230, 160, 0.95)');
-    sunGrad.addColorStop(0.2, 'rgba(255, 140, 50, 0.55)');
-    sunGrad.addColorStop(0.5, 'rgba(200, 70, 30, 0.25)');
-    sunGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-    ctx.fillStyle = sunGrad;
-    ctx.beginPath();
-    ctx.arc(sunX, sunY, width * 0.5, 0, Math.PI * 2);
-    ctx.fill();
+  // Distant Mountain / Island silhouette on horizon
+  const waterHorizonY = height * 0.54;
+  ctx.fillStyle = '#060d1b';
+  ctx.beginPath();
+  ctx.moveTo(width * 0.55, waterHorizonY);
+  ctx.lineTo(width * 0.65, height * 0.46);
+  ctx.lineTo(width * 0.72, height * 0.41);
+  ctx.lineTo(width * 0.78, height * 0.48);
+  ctx.lineTo(width * 0.88, height * 0.44);
+  ctx.lineTo(width, waterHorizonY);
+  ctx.lineTo(width, height);
+  ctx.lineTo(width * 0.55, height);
+  ctx.closePath();
+  ctx.fill();
 
-    // Volumetric God Rays radiating from sun
-    ctx.save();
-    ctx.translate(sunX, sunY);
-    for (let r = 0; r < 8; r++) {
-      const rayAngle = -Math.PI * 0.85 + r * 0.25 + Math.sin(progress * 1.5 + r) * 0.05;
-      ctx.rotate(rayAngle);
-      ctx.fillStyle = 'rgba(255, 235, 180, 0.07)';
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.lineTo(-width * 0.9, -width * 0.15);
-      ctx.lineTo(-width * 0.9, width * 0.15);
-      ctx.closePath();
-      ctx.fill();
-      ctx.rotate(-rayAngle);
-    }
-    ctx.restore();
+  // Ocean Water with depth layers
+  ctx.fillStyle = '#07162b';
+  ctx.fillRect(0, waterHorizonY, width, height - waterHorizonY);
 
-    // Distant Lanka Golden Temple & Mountain silhouette on horizon
-    ctx.fillStyle = '#0b1325';
-    ctx.beginPath();
-    ctx.moveTo(width * 0.6, height * 0.58);
-    ctx.lineTo(width * 0.68, height * 0.48);
-    ctx.lineTo(width * 0.71, height * 0.42); // Temple spire
-    ctx.lineTo(width * 0.74, height * 0.5);
-    ctx.lineTo(width * 0.82, height * 0.45);
-    ctx.lineTo(width * 0.88, height * 0.52);
-    ctx.lineTo(width, height * 0.58);
-    ctx.lineTo(width, height * 0.65);
-    ctx.lineTo(width * 0.6, height * 0.65);
-    ctx.closePath();
-    ctx.fill();
-
-    // Temple lights / golden beacons on Lanka
-    ctx.fillStyle = 'rgba(255, 200, 50, 0.85)';
-    ctx.beginPath();
-    ctx.arc(width * 0.71, height * 0.43, 2.5, 0, Math.PI * 2);
-    ctx.arc(width * 0.76, height * 0.49, 1.8, 0, Math.PI * 2);
-    ctx.arc(width * 0.82, height * 0.46, 2, 0, Math.PI * 2);
-    ctx.fill();
-
-    // 2. Multi-Layer Rolling Ocean Waves with dynamic foam
-    const waterHorizonY = height * 0.56;
-    ctx.fillStyle = '#0a1d37';
-    ctx.fillRect(0, waterHorizonY, width, height - waterHorizonY);
-
-    // Sun reflection trail on water
-    const reflectGrad = ctx.createLinearGradient(sunX - 60, waterHorizonY, sunX + 60, height);
-    reflectGrad.addColorStop(0, 'rgba(255, 200, 100, 0.6)');
-    reflectGrad.addColorStop(0.5, 'rgba(230, 120, 40, 0.3)');
-    reflectGrad.addColorStop(1, 'rgba(200, 80, 20, 0.1)');
-    ctx.fillStyle = reflectGrad;
-    ctx.fillRect(sunX - 70, waterHorizonY, 140, height - waterHorizonY);
-
-    // Mid-distance sinusoidal rolling waves
-    ctx.fillStyle = '#062040';
-    ctx.beginPath();
-    ctx.moveTo(0, waterHorizonY + 30);
-    for (let x = 0; x <= width; x += 15) {
-      const y = waterHorizonY + 30 + Math.sin(x * 0.025 + progress * 8) * 12 + Math.cos(x * 0.05 - progress * 4) * 6;
-      ctx.lineTo(x, y);
-    }
-    ctx.lineTo(width, height);
-    ctx.lineTo(0, height);
-    ctx.closePath();
-    ctx.fill();
-
-    // Foreground deep waves with cresting whitecaps
-    ctx.fillStyle = '#031429';
-    ctx.beginPath();
-    ctx.moveTo(0, waterHorizonY + 80);
-    for (let x = 0; x <= width; x += 20) {
-      const y = waterHorizonY + 80 + Math.sin(x * 0.015 + progress * 6 + 1.2) * 22;
-      ctx.lineTo(x, y);
-    }
-    ctx.lineTo(width, height);
-    ctx.lineTo(0, height);
-    ctx.closePath();
-    ctx.fill();
-
-    // White foam crests on foreground waves
-    ctx.strokeStyle = 'rgba(230, 245, 255, 0.45)';
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    for (let x = 0; x <= width; x += 25) {
-      const y = waterHorizonY + 80 + Math.sin(x * 0.015 + progress * 6 + 1.2) * 22;
-      if (Math.sin(x * 0.03 + progress * 4) > 0.1) {
-        ctx.moveTo(x - 12, y);
-        ctx.lineTo(x + 12, y);
-      }
-    }
-    ctx.stroke();
-
-    // 3. Majestic Soaring Figure (Hanuman flying forward across the sea)
-    const figureX = width * (0.28 + progress * 0.22);
-    const figureY = height * (0.34 + Math.sin(progress * 4) * 0.04);
-    const figureScale = 0.95 + progress * 0.2;
-
-    ctx.save();
-    ctx.translate(figureX, figureY);
-    ctx.scale(figureScale, figureScale);
-
-    // Radiant Golden Aura
-    const auraGrad = ctx.createRadialGradient(0, 0, 10, 0, 0, 95);
-    auraGrad.addColorStop(0, 'rgba(255, 220, 100, 0.65)');
-    auraGrad.addColorStop(0.35, 'rgba(255, 160, 40, 0.35)');
-    auraGrad.addColorStop(0.7, 'rgba(255, 100, 20, 0.12)');
-    auraGrad.addColorStop(1, 'rgba(255, 80, 0, 0)');
-    ctx.fillStyle = auraGrad;
-    ctx.beginPath();
-    ctx.arc(0, 0, 95, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Golden divine energy streak trailing behind flight
-    const trailGrad = ctx.createLinearGradient(0, 0, -140, 20);
-    trailGrad.addColorStop(0, 'rgba(255, 215, 0, 0.7)');
-    trailGrad.addColorStop(0.5, 'rgba(255, 130, 30, 0.3)');
-    trailGrad.addColorStop(1, 'rgba(255, 100, 0, 0)');
-    ctx.fillStyle = trailGrad;
-    ctx.beginPath();
-    ctx.moveTo(0, -10);
-    ctx.lineTo(-140, 15 + Math.sin(progress * 10) * 8);
-    ctx.lineTo(-110, 35);
-    ctx.lineTo(0, 15);
-    ctx.closePath();
-    ctx.fill();
-
-    // Billowing Red Royal Cape fluttering
-    ctx.fillStyle = '#dc2626';
-    ctx.beginPath();
-    ctx.moveTo(-10, 0);
-    ctx.quadraticCurveTo(-60, 10 + Math.sin(progress * 12) * 12, -110, 22 + Math.sin(progress * 15) * 16);
-    ctx.quadraticCurveTo(-70, 32 + Math.sin(progress * 12 + 1) * 10, -15, 18);
-    ctx.closePath();
-    ctx.fill();
-
-    // Muscular Hero Silhouette
-    ctx.fillStyle = '#1c1917';
-    ctx.beginPath();
-    ctx.ellipse(5, 5, 26, 16, Math.PI * 0.18, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Extended Forward Right Arm
-    ctx.lineWidth = 9;
-    ctx.lineCap = 'round';
-    ctx.strokeStyle = '#1c1917';
-    ctx.beginPath();
-    ctx.moveTo(18, 0);
-    ctx.lineTo(54, -14);
-    ctx.stroke();
-
-    // Golden Mace (Gada) in Hand
-    ctx.strokeStyle = '#f59e0b';
-    ctx.lineWidth = 4.5;
-    ctx.beginPath();
-    ctx.moveTo(38, -4);
-    ctx.lineTo(68, -28);
-    ctx.stroke();
-    // Mace head
-    ctx.fillStyle = '#d97706';
-    ctx.beginPath();
-    ctx.arc(68, -28, 9, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Head with Mukut (Golden Crown)
-    ctx.fillStyle = '#1c1917';
-    ctx.beginPath();
-    ctx.arc(24, -12, 11, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#fbbf24';
-    ctx.beginPath();
-    ctx.moveTo(20, -21);
-    ctx.lineTo(26, -33);
-    ctx.lineTo(31, -21);
-    ctx.closePath();
-    ctx.fill();
-
-    // Trailing powerful legs
-    ctx.lineWidth = 8;
-    ctx.strokeStyle = '#1c1917';
-    ctx.beginPath();
-    ctx.moveTo(-14, 10);
-    ctx.lineTo(-44, 26);
-    ctx.stroke();
-
-    // Glowing ornaments
-    ctx.fillStyle = '#fef08a';
-    ctx.beginPath();
-    ctx.arc(28, -8, 2.5, 0, Math.PI * 2);
-    ctx.arc(14, 2, 2.5, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.restore();
-
-    // Water spray droplets rising up
-    for (let s = 0; s < 25; s++) {
-      const sx = (s * 31 + progress * 140) % width;
-      const sy = waterHorizonY + 40 + ((s * 41) % (height - waterHorizonY - 60)) + Math.sin(progress * 6 + s) * 10;
-      ctx.fillStyle = `rgba(255, 255, 255, ${0.3 + (s % 3) * 0.2})`;
-      ctx.beginPath();
-      ctx.arc(sx, sy, 1.2 + (s % 2), 0, Math.PI * 2);
-      ctx.fill();
-    }
-  } else {
-    // Cinematic atmospheric scenery
-    const sky = ctx.createLinearGradient(0, 0, 0, height);
-    sky.addColorStop(0, '#020617');
-    sky.addColorStop(0.5, '#0f172a');
-    sky.addColorStop(1, '#1e293b');
-    ctx.fillStyle = sky;
-    ctx.fillRect(0, 0, width, height);
-
-    // Mountain silhouettes
-    ctx.fillStyle = '#090d16';
-    ctx.beginPath();
-    ctx.moveTo(0, height * 0.65);
-    ctx.lineTo(width * 0.3, height * 0.45);
-    ctx.lineTo(width * 0.6, height * 0.7);
-    ctx.lineTo(width * 0.85, height * 0.38);
-    ctx.lineTo(width, height * 0.65);
-    ctx.lineTo(width, height);
-    ctx.lineTo(0, height);
-    ctx.closePath();
-    ctx.fill();
+  // Rolling waves
+  ctx.fillStyle = '#041021';
+  ctx.beginPath();
+  ctx.moveTo(0, waterHorizonY + 35);
+  for (let x = 0; x <= width; x += 15) {
+    const y = waterHorizonY + 35 + Math.sin(x * 0.025 + progress * 6) * 10;
+    ctx.lineTo(x, y);
   }
+  ctx.lineTo(width, height);
+  ctx.lineTo(0, height);
+  ctx.closePath();
+  ctx.fill();
 
-  // Cinematic horizontal light streak
-  const streakY = height * 0.42;
-  const streak = ctx.createLinearGradient(0, streakY, width, streakY);
-  streak.addColorStop(0, 'rgba(255, 200, 100, 0)');
-  streak.addColorStop(0.5, 'rgba(255, 240, 200, 0.35)');
-  streak.addColorStop(1, 'rgba(255, 200, 100, 0)');
-  ctx.fillStyle = streak;
-  ctx.fillRect(0, streakY - 1, width, 2);
+  // Foreground wave crests with foam
+  ctx.strokeStyle = 'rgba(200, 230, 255, 0.4)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let x = 0; x <= width; x += 20) {
+    const y = waterHorizonY + 70 + Math.sin(x * 0.015 + progress * 5) * 16;
+    if (Math.sin(x * 0.03 + progress * 3) > 0.2) {
+      ctx.moveTo(x - 10, y);
+      ctx.lineTo(x + 10, y);
+    }
+  }
+  ctx.stroke();
 }
 
 // Helper: Generate photorealistic cinematic AI video clip with camera motion and audio
@@ -394,29 +308,15 @@ async function generateClientVideoClip(
   const aiImageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(enhancedVisualPrompt)}?width=${width}&height=${height}&seed=${seed}&nologo=true`;
 
   const cacheKey = `${text}_${sceneIndex}_${aspectRatio}`;
-  let img: HTMLImageElement;
+  let img: HTMLImageElement | null = null;
 
   if (sceneImageCache.has(cacheKey) && sceneImageCache.get(cacheKey)!.complete && sceneImageCache.get(cacheKey)!.naturalWidth > 0) {
     img = sceneImageCache.get(cacheKey)!;
   } else {
-    img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.src = aiImageUrl;
-    sceneImageCache.set(cacheKey, img);
-
-    // Give Pollinations up to 16 seconds to synthesize the 8K AI frame
-    await new Promise<void>(resolve => {
-      let isDone = false;
-      const onDone = () => {
-        if (!isDone) {
-          isDone = true;
-          resolve();
-        }
-      };
-      img.onload = onDone;
-      img.onerror = onDone;
-      setTimeout(onDone, 16000);
-    });
+    img = await loadDiffusionImageViaBlob(text, width, height, seed);
+    if (img) {
+      sceneImageCache.set(cacheKey, img);
+    }
   }
 
   const canvas = document.createElement('canvas');
@@ -428,8 +328,8 @@ async function generateClientVideoClip(
   const clipSeconds = Math.max(4, Math.min(10, Math.round(Number(durationSec) || 6)));
 
   const drawSceneVisual = (progress: number) => {
-    // 1. If AI Photorealistic Image Loaded Successfully: Smooth Ken Burns Motion
-    if (img.complete && img.naturalWidth > 0) {
+    // 1. If AI Photorealistic Image Loaded: Smooth Cinematic Ken Burns Motion
+    if (img && img.complete && img.naturalWidth > 0) {
       ctx.save();
       const zoom = 1.0 + progress * 0.12;
       const panX = Math.sin(progress * Math.PI) * (width * 0.035);
@@ -469,8 +369,8 @@ async function generateClientVideoClip(
         ctx.fill();
       }
     } else {
-      // 2. High-Fidelity Thematic Cinematic Animation (Soaring Hanuman, Waves, Lanka, Temple Lights)
-      drawThematicCinematicIllustration(ctx, width, height, progress, text);
+      // Atmospheric scenic fallback (pure lighting and waves, no cartoon shapes)
+      drawAtmosphericScenicFallback(ctx, width, height, progress);
     }
 
     // 2. Cinematic Widescreen Letterbox Bars
@@ -678,26 +578,32 @@ export const apiClient = {
       return res.json();
     }
 
-    // Client-side fallback splitting (for GitHub Pages static deploy)
+    // Client-side splitting with rich prompt engineering (for GitHub Pages static deploy)
     const sentences = script
       .split(/(?<=[.?!])\s+/)
       .map(s => s.trim())
       .filter(s => s.length > 0);
 
-    const defaultDuration = options?.targetDuration || 4.5;
+    const defaultDuration = options?.targetDuration || 5.0;
     const fallbackScenes: SplitSceneResult[] = (
-      sentences.length > 0 ? sentences : ['Opening scene of the story.']
+      sentences.length > 0 ? sentences : ['Opening scene of the narrative.']
     ).map((text, idx) => ({
       scene_id: `scene_${idx + 1}`,
       narration_text: text,
-      visual_prompt: `Cinematic Wan 2.1 video of: ${text}. Atmospheric volumetric lighting, anamorphic lens, 8k render, ${
-        options?.genreStyle || 'Cinematic Photorealism'
-      }.`,
-      target_duration_seconds: Math.max(3.0, Math.min(8.0, text.split(' ').length * 0.4 + 2.5)),
+      visual_prompt: generateDetailedDiffusionPrompt(text, options?.genreStyle),
+      target_duration_seconds: Math.max(3.5, Math.min(8.0, text.split(' ').length * 0.4 + 2.8)),
     }));
 
+    let projectTitle = 'Custom Video Project';
+    const lowerScript = script.toLowerCase();
+    if (lowerScript.includes('hanuman') || lowerScript.includes('lanka')) {
+      projectTitle = 'Mythological Epic: Hanuman Soaring to Lanka';
+    } else if (sentences[0]) {
+      projectTitle = sentences[0].slice(0, 32) + '...';
+    }
+
     return {
-      title: sentences[0] ? sentences[0].slice(0, 30) + '...' : 'Custom Video Project',
+      title: projectTitle,
       scenes: fallbackScenes,
     };
   },

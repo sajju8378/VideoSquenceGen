@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { SCRIPT_PRESETS, ScriptPreset } from '../presets.ts';
 import type { SplitSceneResult } from '../types.ts';
-import { apiClient } from '../services/apiClient.ts';
+import { apiClient, generateDetailedDiffusionPrompt } from '../services/apiClient.ts';
 
 interface ScriptSplitterProps {
   onJobCreated: (jobId: string) => void;
@@ -24,10 +24,10 @@ interface ScriptSplitterProps {
 export const ScriptSplitter: React.FC<ScriptSplitterProps> = ({ onJobCreated }) => {
   const [selectedPresetId, setSelectedPresetId] = useState<string>(SCRIPT_PRESETS[0].id);
   const [scriptText, setScriptText] = useState<string>(SCRIPT_PRESETS[0].script);
-  const [projectTitle, setProjectTitle] = useState<string>('Cyberpunk Noir: Neon Infiltration');
+  const [projectTitle, setProjectTitle] = useState<string>(SCRIPT_PRESETS[0].name);
   const [genreStyle, setGenreStyle] = useState<string>(SCRIPT_PRESETS[0].genre);
   const [aspectRatio, setAspectRatio] = useState<'16:9' | '9:16'>(SCRIPT_PRESETS[0].aspectRatio);
-  const [targetDuration, setTargetDuration] = useState<number>(4.5);
+  const [targetDuration, setTargetDuration] = useState<number>(5.0);
   const [resolution, setResolution] = useState<string>('720p');
 
   const [isSplitting, setIsSplitting] = useState<boolean>(false);
@@ -42,6 +42,22 @@ export const ScriptSplitter: React.FC<ScriptSplitterProps> = ({ onJobCreated }) 
     setGenreStyle(preset.genre);
     setAspectRatio(preset.aspectRatio);
     setTargetDuration(preset.durationPerScene);
+  };
+
+  const handleScriptChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setScriptText(val);
+
+    // Auto-detect mythological or custom epic themes to set appropriate visual genre
+    const lower = val.toLowerCase();
+    if (lower.includes('hanuman') || lower.includes('lanka') || lower.includes('ramayana')) {
+      if (genreStyle.toLowerCase().includes('cyberpunk') || !genreStyle) {
+        setGenreStyle('Photorealistic Live-Action Epic, IMAX 70mm, Divine Mythological Realism');
+      }
+      if (!projectTitle || projectTitle.includes('Cyberpunk')) {
+        setProjectTitle('Mythological Epic: Hanuman Soaring to Lanka');
+      }
+    }
   };
 
   const handleSplitScript = async () => {
@@ -59,7 +75,7 @@ export const ScriptSplitter: React.FC<ScriptSplitterProps> = ({ onJobCreated }) 
         aspectRatio,
       });
 
-      if (data.title && !projectTitle) {
+      if (data.title) {
         setProjectTitle(data.title);
       }
       setScenes(data.scenes || []);
@@ -76,6 +92,21 @@ export const ScriptSplitter: React.FC<ScriptSplitterProps> = ({ onJobCreated }) 
       copy[index] = { ...copy[index], [field]: value };
       return copy;
     });
+  };
+
+  const handleAutoDetailPrompt = (index: number) => {
+    const scene = scenes[index];
+    const enhanced = generateDetailedDiffusionPrompt(scene.narration_text || scene.visual_prompt, genreStyle);
+    handleUpdateScene(index, 'visual_prompt', enhanced);
+  };
+
+  const handleEnhanceAllPrompts = () => {
+    setScenes(prev =>
+      prev.map(s => ({
+        ...s,
+        visual_prompt: generateDetailedDiffusionPrompt(s.narration_text || s.visual_prompt, genreStyle),
+      }))
+    );
   };
 
   const handleAddScene = () => {
@@ -213,7 +244,7 @@ export const ScriptSplitter: React.FC<ScriptSplitterProps> = ({ onJobCreated }) 
             <textarea
               rows={4}
               value={scriptText}
-              onChange={e => setScriptText(e.target.value)}
+              onChange={handleScriptChange}
               placeholder="Paste your script or narration sentences here..."
               className="w-full px-3.5 py-2.5 bg-slate-950/80 border border-slate-800 rounded-xl text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500 font-sans leading-relaxed"
             />
@@ -300,24 +331,36 @@ export const ScriptSplitter: React.FC<ScriptSplitterProps> = ({ onJobCreated }) 
       {/* Structured Scenes List (if split) */}
       {scenes.length > 0 && (
         <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 md:p-6 shadow-xl backdrop-blur-sm space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800">
             <div>
               <h3 className="text-sm font-semibold text-white flex items-center gap-2">
                 <Layers className="w-4 h-4 text-indigo-400" />
                 2. Scene Storyboard Breakdown ({scenes.length} Scenes)
               </h3>
               <p className="text-xs text-slate-400 mt-0.5">
-                Review and refine visual diffusion prompts and voiceover narration before queuing.
+                Review visual diffusion prompts with character anatomy, costume, background setup & photorealism.
               </p>
             </div>
 
-            <button
-              onClick={handleAddScene}
-              className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 flex items-center gap-1.5 border border-slate-700/60"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Add Scene</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleEnhanceAllPrompts}
+                className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 flex items-center gap-1.5 transition cursor-pointer"
+                title="Automatically expand all scene prompts with character and background details"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                <span>Auto-Detail All Prompts</span>
+              </button>
+
+              <button
+                onClick={handleAddScene}
+                className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 flex items-center gap-1.5 border border-slate-700/60"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add Scene</span>
+              </button>
+            </div>
           </div>
 
           <div className="space-y-3.5">
@@ -364,28 +407,41 @@ export const ScriptSplitter: React.FC<ScriptSplitterProps> = ({ onJobCreated }) 
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 text-xs">
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
-                      Visual Diffusion Prompt (Wan 2.1)
-                    </label>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
+                        Visual Diffusion Prompt (Character + BG Setup)
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => handleAutoDetailPrompt(idx)}
+                        className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-300 hover:text-amber-200 bg-amber-500/10 hover:bg-amber-500/20 px-2 py-0.5 rounded border border-amber-500/30 transition cursor-pointer"
+                        title="Expand with character anatomy, costume, background setup & photorealism"
+                      >
+                        <Sparkles className="w-3 h-3 text-amber-400" />
+                        <span>Detail Character & BG</span>
+                      </button>
+                    </div>
                     <textarea
-                      rows={2}
+                      rows={4}
                       value={scene.visual_prompt}
                       onChange={e => handleUpdateScene(idx, 'visual_prompt', e.target.value)}
-                      placeholder="Detailed visual prompt describing camera movement, subject, lighting..."
-                      className="w-full px-3 py-2 bg-slate-900/90 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:border-indigo-500 font-sans"
+                      placeholder="Detailed visual prompt describing character anatomy, costume, background setup, lighting..."
+                      className="w-full px-3 py-2 bg-slate-900/90 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:border-amber-500/70 font-sans leading-relaxed text-xs"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
-                      Voiceover Narration (TTS Audio)
-                    </label>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                        Voiceover Narration (TTS Audio)
+                      </label>
+                    </div>
                     <textarea
-                      rows={2}
+                      rows={4}
                       value={scene.narration_text}
                       onChange={e => handleUpdateScene(idx, 'narration_text', e.target.value)}
                       placeholder="Spoken voiceover or dialogue line..."
-                      className="w-full px-3 py-2 bg-slate-900/90 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:border-blue-500 font-sans"
+                      className="w-full px-3 py-2 bg-slate-900/90 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:border-blue-500 font-sans leading-relaxed text-xs"
                     />
                   </div>
                 </div>

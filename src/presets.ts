@@ -9,6 +9,17 @@ export interface ScriptPreset {
 
 export const SCRIPT_PRESETS: ScriptPreset[] = [
   {
+    id: 'hanuman_lanka',
+    name: 'Mythological Epic: Hanuman Soaring to Lanka',
+    genre: 'Photorealistic Live-Action Epic, IMAX 70mm, Divine Mythological Realism',
+    aspectRatio: '16:9',
+    durationPerScene: 5.5,
+    script: `Lord Hanuman expands his divine form and leaps fearlessly into the sky towards the distant kingdom of Lanka.
+Soaring across the vast dark blue ocean, his golden skin radiant in the golden sunset rays as waves crash below.
+Holding his divine golden Gada firmly, with royal saffron silk dhoti billowing in the high-altitude storm winds.
+The island fortress of Lanka appears on the horizon with majestic golden spires and torchlit citadels.`,
+  },
+  {
     id: 'cyberpunk_noir',
     name: 'Cyberpunk Noir: Neon Infiltration',
     genre: 'Cinematic Cyberpunk, Anamorphic lens, Blade Runner aesthetic',

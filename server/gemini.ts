@@ -22,16 +22,18 @@ export async function splitScriptWithGemini(
   }
 ): Promise<{ title: string; scenes: SplitSceneResult[] }> {
   const defaultDuration = options?.targetSceneDuration || 5.0;
-  const genre = options?.genreStyle || 'Cinematic, Photorealistic';
+  const genre = options?.genreStyle || 'Photorealistic Live-Action Epic, IMAX 70mm, Masterpiece';
 
-  const systemInstruction = `You are an expert Hollywood video director and AI video prompt engineer specializing in Wan 2.1 video diffusion models.
-Your task is to take a raw video script or narrative text and split it into sequential, cohesive visual scenes.
-For each scene:
-1. Provide a unique scene_id ('scene_1', 'scene_2', etc.)
-2. Provide concise, impactful 'narration_text' for the voiceover
-3. Provide a highly descriptive 'visual_prompt' optimized for video diffusion (describing camera movement, lighting, subject action, atmosphere, cinematic color grading, ${genre})
-4. Provide 'target_duration_seconds' (between 3.5 and 8.0 seconds, average around ${defaultDuration} seconds).
-Also generate a compelling title for the video project.`;
+  const systemInstruction = `You are an expert Hollywood video director and master AI video prompt engineer specializing in Wan 2.1 video diffusion models.
+Your task is to take a raw video script or narrative text and split it into sequential, cohesive, photorealistic visual scenes.
+
+CRITICAL MANDATORY INSTRUCTIONS FOR 'visual_prompt':
+You must NEVER just copy or rephrase the narration text.
+Instead, for EVERY scene, you MUST craft a rich, professional, 60-90 word diffusion prompt containing:
+1. CHARACTER DETAILS: Explicitly describe the character's physical anatomy, athletic build, facial features, skin tone, clothing textures, sacred ornaments, weapons/items held, and exact body pose/flight trajectory. (e.g. for Hanuman: "Lord Hanuman, the divine Hindu warrior deity, towering muscular heroic physique, glowing golden-amber skin, wearing an ornate golden Mukut crown, celestial armlets, royal saffron silk dhoti billowing in high winds, wielding a heavy celestial golden Gada mace in right hand, soaring forward in flight").
+2. BACKGROUND SETUP (BG SETUP): Explicitly describe the full environment and depth layers: landscape, terrain, ocean/sea waves with foam and spray, weather, architectural landmarks on the horizon (e.g. "vast dark-teal tumultuous ocean with crashing whitecap waves, distant island of Lanka with golden palace citadels on the horizon, dramatic golden-hour sky with volumetric god rays breaking through clouds").
+3. CINEMATOGRAPHY & LIGHTING: Specify tracking camera movement, lens, volumetric lighting, and color grading (e.g. "cinematic tracking side-angle shot, IMAX 70mm, Panavision anamorphic lens, epic atmospheric depth haze").
+4. STRICT NEGATIVE CONSTRAINTS: Always conclude with: "Photorealistic live-action film still, 8K, Unreal Engine 5 render, NOT cartoon, NOT comic, NOT 2D animation, NOT sketch, NOT bird caricature".`;
 
   try {
     const response = await ai.models.generateContent({
