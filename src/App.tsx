@@ -229,7 +229,7 @@ export default function App() {
       </main>
 
       {/* Floating Status Bar for Ongoing Job */}
-      {currentJob && currentJob.status === 'processing' && (
+      {currentJob && (currentJob.gpuLockActive || currentJob.scenes?.some(s => s.status === 'generating')) && (
         <div className="fixed bottom-4 right-4 z-40 bg-slate-900/95 border border-blue-500/40 rounded-2xl p-4 shadow-2xl backdrop-blur-md max-w-sm flex items-center gap-3 ring-1 ring-blue-500/20">
           <RefreshCw className="w-5 h-5 text-blue-400 animate-spin shrink-0" />
           <div className="text-xs">

@@ -142,6 +142,8 @@ apiRouter.post(['/jobs/:id/retry-scene', '/jobs/:id/scenes/:sceneId/generate'], 
       const job = dbService.getJob(req.params.id);
       if (job && job.scenes?.every(s => s.status === 'done')) {
         dbService.updateJobStatus(job.id, 'completed');
+      } else if (job) {
+        dbService.updateJobStatus(job.id, 'queued');
       }
     });
 

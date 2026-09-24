@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Play,
+  Pause,
   RotateCcw,
   CheckCircle2,
   AlertTriangle,
@@ -15,7 +16,8 @@ import {
   ChevronDown,
   ChevronUp,
   Check,
-  Video
+  Video,
+  Timer
 } from 'lucide-react';
 import type { Job, Scene } from '../types.ts';
 import { apiClient, downloadVideoFile } from '../services/apiClient.ts';
@@ -36,21 +38,67 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
   const [retryingSceneId, setRetryingSceneId] = useState<string | null>(null);
   const [expandedPreviewSceneId, setExpandedPreviewSceneId] = useState<string | null>(null);
 
+  // Auto-advance pipeline state
+  const [autoAdvance, setAutoAdvance] = useState<boolean>(true);
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const countdownTimerRef = useRef<any>(null);
+
   // Simulation test modes
   const [simOOM, setSimOOM] = useState<boolean>(false);
   const [simQuota, setSimQuota] = useState<boolean>(false);
   const [simTimeout, setSimTimeout] = useState<boolean>(false);
-  const [acceleratedSpeed, setAcceleratedSpeed] = useState<boolean>(true);
+  const [acceleratedSpeed, setAcceleratedSpeed] = useState<boolean>(false);
 
   const scenes = job.scenes || [];
   const completedCount = scenes.filter(s => s.status === 'done').length;
   const failedCount = scenes.filter(s => s.status === 'failed').length;
   const progressPercent = scenes.length > 0 ? Math.round((completedCount / scenes.length) * 100) : 0;
 
-  // Find next pending scene and last completed scene for guided step-by-step flow
+  // Find next pending scene and currently generating scene
   const nextPendingScene = scenes.find(s => s.status === 'pending');
   const activeGeneratingScene = scenes.find(s => s.status === 'generating');
   const lastCompletedScene = [...scenes].reverse().find(s => s.status === 'done');
+
+  // Single GPU lock is active if any scene is generating
+  const isGpuBusy = !!generatingSceneId || !!activeGeneratingScene;
+
+  // Auto-advance countdown effect:
+  // When a video completes and there is a next pending scene, automatically start countdown to next scene
+  useEffect(() => {
+    // Clear any existing countdown if GPU is busy or all scenes done or no pending scene
+    if (isGpuBusy || !nextPendingScene || !autoAdvance) {
+      if (countdownTimerRef.current) {
+        clearInterval(countdownTimerRef.current);
+        countdownTimerRef.current = null;
+      }
+      setCountdown(null);
+      return;
+    }
+
+    // Only trigger auto-advance countdown if at least one scene is already done (i.e. proceeding to scene 2, 3...)
+    if (completedCount > 0 && nextPendingScene) {
+      setCountdown(3);
+      countdownTimerRef.current = setInterval(() => {
+        setCountdown(prev => {
+          if (prev === null || prev <= 1) {
+            clearInterval(countdownTimerRef.current);
+            countdownTimerRef.current = null;
+            // Trigger next scene generation
+            handleGenerateSingle(nextPendingScene.id);
+            return null;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+
+      return () => {
+        if (countdownTimerRef.current) {
+          clearInterval(countdownTimerRef.current);
+          countdownTimerRef.current = null;
+        }
+      };
+    }
+  }, [completedCount, isGpuBusy, autoAdvance, nextPendingScene?.id]);
 
   const resolveClipUrl = (filePath: string | null) => {
     if (!filePath) return '';
@@ -78,6 +126,13 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
   };
 
   const handleGenerateSingle = async (sceneId: string, forcedResolution?: string) => {
+    // Cancel any running countdown
+    if (countdownTimerRef.current) {
+      clearInterval(countdownTimerRef.current);
+      countdownTimerRef.current = null;
+    }
+    setCountdown(null);
+
     setGeneratingSceneId(sceneId);
     try {
       await apiClient.generateSingleScene(job.id, sceneId, forcedResolution);
@@ -87,6 +142,15 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
     } finally {
       setGeneratingSceneId(null);
     }
+  };
+
+  const cancelAutoAdvance = () => {
+    if (countdownTimerRef.current) {
+      clearInterval(countdownTimerRef.current);
+      countdownTimerRef.current = null;
+    }
+    setCountdown(null);
+    setAutoAdvance(false);
   };
 
   const handleStartQueue = async () => {
@@ -133,7 +197,7 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
         return (
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/30 animate-pulse">
             <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-            <span>Generating (GPU Lock)</span>
+            <span>Generating Video (GPU Lock)</span>
           </span>
         );
       case 'waiting_quota':
@@ -162,36 +226,69 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* 1. GUIDED STEP-BY-STEP PROCEED CONTROLLER BANNER (Requirement: 1-by-1 generation with direct download & proceed) */}
-      <div className="rounded-2xl border border-blue-500/30 bg-gradient-to-r from-blue-950/40 via-slate-900 to-indigo-950/40 p-5 md:p-6 shadow-2xl backdrop-blur-sm relative overflow-hidden">
+      {/* 1. GUIDED STEP-BY-STEP & AUTO-ADVANCE BANNER */}
+      <div className="rounded-2xl border border-blue-500/30 bg-gradient-to-r from-blue-950/50 via-slate-900 to-indigo-950/50 p-5 md:p-6 shadow-2xl backdrop-blur-sm relative overflow-hidden">
         <div className="absolute top-0 right-0 w-80 h-80 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
 
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5 relative z-10">
-          <div className="space-y-2">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-blue-500/20 text-blue-300 border border-blue-400/30">
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Step-by-Step Production Mode</span>
+          <div className="space-y-2.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-blue-500/20 text-blue-300 border border-blue-400/30">
+                <Sparkles className="w-3.5 h-3.5 text-blue-400" />
+                <span>Wan 2.1 Sequential Pipeline</span>
+              </span>
+
+              {/* Auto-Advance Toggle Badge */}
+              <button
+                onClick={() => {
+                  if (countdown !== null) cancelAutoAdvance();
+                  else setAutoAdvance(!autoAdvance);
+                }}
+                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition cursor-pointer border ${
+                  autoAdvance
+                    ? 'bg-indigo-500/20 text-indigo-300 border-indigo-400/40 hover:bg-indigo-500/30'
+                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-300'
+                }`}
+                title="When enabled, proceeds to the next scene automatically after showing download link"
+              >
+                <Timer className="w-3.5 h-3.5" />
+                <span>Auto-Advance: {autoAdvance ? 'ON' : 'OFF'}</span>
+              </button>
             </div>
 
-            {/* Dynamic Step Title */}
+            {/* Dynamic Step Title & Status */}
             {activeGeneratingScene ? (
               <div>
                 <h2 className="text-lg md:text-xl font-bold text-white flex items-center gap-2.5">
                   <RefreshCw className="w-5 h-5 text-blue-400 animate-spin" />
-                  <span>Generating Video {activeGeneratingScene.scene_index + 1}...</span>
+                  <span>
+                    Generating Video Scene {activeGeneratingScene.scene_index + 1} of {scenes.length}...
+                  </span>
                 </h2>
                 <p className="text-xs text-slate-300 mt-1 max-w-xl">
-                  Wan 2.1 single GPU lock acquired. Synthesizing visual frames and audio waveform for Scene {activeGeneratingScene.scene_index + 1}.
+                  Synthesizing visual frames ({Number(activeGeneratingScene.target_duration_seconds).toFixed(1)}s full duration) under single GPU lock. Memory is cleared immediately upon completion.
+                </p>
+              </div>
+            ) : countdown !== null && nextPendingScene ? (
+              <div>
+                <h2 className="text-lg md:text-xl font-bold text-amber-300 flex items-center gap-2.5">
+                  <Timer className="w-5 h-5 text-amber-400 animate-pulse" />
+                  <span>
+                    Video {nextPendingScene.scene_index} Ready! Starting Video {nextPendingScene.scene_index + 1} in {countdown}s...
+                  </span>
+                </h2>
+                <p className="text-xs text-slate-300 mt-1 max-w-xl">
+                  Download link for Video {nextPendingScene.scene_index} is available below. Advancing automatically to Video {nextPendingScene.scene_index + 1}.
                 </p>
               </div>
             ) : completedCount === scenes.length && scenes.length > 0 ? (
               <div>
                 <h2 className="text-lg md:text-xl font-bold text-emerald-400 flex items-center gap-2">
                   <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                  <span>All {scenes.length} Videos Generated Successfully!</span>
+                  <span>All {scenes.length} Scene Videos Generated Successfully!</span>
                 </h2>
                 <p className="text-xs text-slate-300 mt-1">
-                  Each scene video clip is persisted and ready for download or one-click multi-scene cinema assembly.
+                  All clips have full target duration and can be downloaded individually or joined into the final assembled video.
                 </p>
               </div>
             ) : nextPendingScene ? (
@@ -205,11 +302,11 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
                 </h2>
                 <p className="text-xs text-slate-300 mt-1 max-w-2xl line-clamp-2">
                   {nextPendingScene.scene_index === 0 ? (
-                    <>Generate Video 1 first. You can download and review the clip before proceeding to subsequent scenes.</>
+                    <>Generate Video 1 first. Your download link will appear right here when ready.</>
                   ) : (
                     <>
-                      Download or review Video {nextPendingScene.scene_index} below, then click to generate Video {nextPendingScene.scene_index + 1}:
-                      <span className="italic text-slate-200 ml-1">"{nextPendingScene.visual_prompt}"</span>
+                      Download Video {nextPendingScene.scene_index} below, or proceed to generate Video {nextPendingScene.scene_index + 1} (
+                      {Number(nextPendingScene.target_duration_seconds).toFixed(1)}s).
                     </>
                   )}
                 </p>
@@ -224,11 +321,31 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
 
           {/* Action Buttons in Step-by-Step Banner */}
           <div className="flex flex-wrap items-center gap-3">
-            {/* If Video N was just completed, show direct download button for it */}
-            {lastCompletedScene && lastCompletedScene.output_path && !activeGeneratingScene && (
+            {/* If countdown is active, show skip & pause buttons */}
+            {countdown !== null && nextPendingScene && (
+              <>
+                <button
+                  onClick={() => handleGenerateSingle(nextPendingScene.id)}
+                  className="px-5 py-2.5 rounded-xl font-bold text-xs text-white bg-blue-600 hover:bg-blue-500 flex items-center gap-2 shadow-xl shadow-blue-600/30 transition cursor-pointer"
+                >
+                  <ArrowRight className="w-4 h-4" />
+                  <span>Proceed to Video {nextPendingScene.scene_index + 1} Now</span>
+                </button>
+                <button
+                  onClick={cancelAutoAdvance}
+                  className="px-4 py-2.5 rounded-xl font-medium text-xs text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 flex items-center gap-2 transition cursor-pointer"
+                >
+                  <Pause className="w-3.5 h-3.5" />
+                  <span>Pause Auto-Advance</span>
+                </button>
+              </>
+            )}
+
+            {/* Direct download button for the latest completed scene */}
+            {lastCompletedScene && lastCompletedScene.output_path && !isGpuBusy && (
               <button
                 onClick={() => handleDownloadScene(lastCompletedScene, lastCompletedScene.scene_index)}
-                className="px-4 py-2.5 rounded-xl font-bold text-xs text-emerald-300 bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-500/40 flex items-center gap-2 shadow-lg transition cursor-pointer"
+                className="px-4 py-2.5 rounded-xl font-bold text-xs text-emerald-300 bg-emerald-950/70 hover:bg-emerald-900 border border-emerald-500/40 flex items-center gap-2 shadow-lg transition cursor-pointer"
                 title={`Download Video ${lastCompletedScene.scene_index + 1} (.mp4)`}
               >
                 <Download className="w-4 h-4 text-emerald-400" />
@@ -236,17 +353,17 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
               </button>
             )}
 
-            {/* If there is a next pending scene, show prominent "Generate Video [N]" or "Proceed to Video [N]" */}
-            {nextPendingScene && (
+            {/* If next pending scene exists and no countdown is active */}
+            {countdown === null && nextPendingScene && (
               <button
                 onClick={() => handleGenerateSingle(nextPendingScene.id)}
-                disabled={!!activeGeneratingScene || generatingSceneId === nextPendingScene.id}
+                disabled={isGpuBusy}
                 className="px-5 py-2.5 rounded-xl font-bold text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 flex items-center gap-2 shadow-xl shadow-blue-600/30 transition cursor-pointer"
               >
-                {generatingSceneId === nextPendingScene.id || activeGeneratingScene?.id === nextPendingScene.id ? (
+                {isGpuBusy ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>Synthesizing Video {nextPendingScene.scene_index + 1}...</span>
+                    <span>Synthesizing Video...</span>
                   </>
                 ) : nextPendingScene.scene_index === 0 ? (
                   <>
@@ -266,9 +383,9 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
             {nextPendingScene && (
               <button
                 onClick={handleStartQueue}
-                disabled={isStartingQueue || job.status === 'processing'}
-                className="px-4 py-2.5 rounded-xl font-medium text-xs text-slate-300 bg-slate-800 hover:bg-slate-750 hover:text-white border border-slate-700 flex items-center gap-2 transition cursor-pointer"
-                title="Automatically process all remaining scenes sequentially"
+                disabled={isStartingQueue || isGpuBusy}
+                className="px-4 py-2.5 rounded-xl font-medium text-xs text-slate-300 bg-slate-800 hover:bg-slate-750 hover:text-white disabled:opacity-50 border border-slate-700 flex items-center gap-2 transition cursor-pointer"
+                title="Automatically process all remaining scenes sequentially with GPU cleanup"
               >
                 <Play className="w-3.5 h-3.5 text-slate-400" />
                 <span>Run All Sequentially</span>
@@ -301,7 +418,7 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
         <div className="mt-5 pt-4 border-t border-slate-800/80 space-y-2">
           <div className="flex items-center justify-between text-xs font-mono">
             <span className="text-slate-400">
-              Generated Videos: <strong className="text-emerald-400 font-bold">{completedCount}</strong> / {scenes.length}
+              Completed Scenes: <strong className="text-emerald-400 font-bold">{completedCount}</strong> / {scenes.length}
             </span>
             <span className="text-blue-400 font-bold">{progressPercent}% Completed</span>
           </div>
@@ -314,14 +431,14 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
         </div>
       </div>
 
-      {/* 2. Resilience Edge-Case Simulator Controls (Collapsible / Compact) */}
+      {/* 2. ZeroGPU Resilience Simulator Controls */}
       <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 md:p-5 shadow-lg space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-xs font-semibold text-amber-400">
             <Bug className="w-4 h-4 text-amber-400" />
             <span>ZeroGPU Fault Injection & Testing Simulator</span>
           </div>
-          <span className="text-[11px] text-slate-500 font-mono">Simulate real Hugging Face ZeroGPU edge cases</span>
+          <span className="text-[11px] text-slate-500 font-mono">Simulate real Hugging Face ZeroGPU conditions</span>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs">
@@ -406,16 +523,16 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
               className="mt-0.5 accent-blue-500 cursor-pointer"
             />
             <div>
-              <span className="font-semibold block text-slate-200">Fast Generation Speed</span>
+              <span className="font-semibold block text-slate-200">Ultra-Fast Preview (3s)</span>
               <span className="text-[11px] text-slate-400">
-                Quick synthesis for snappy step-by-step testing.
+                Accelerates frame recording for swift workflow.
               </span>
             </div>
           </label>
         </div>
       </div>
 
-      {/* 3. SCENE EXECUTION LEDGER (With Direct Download & Individual Generation Buttons) */}
+      {/* 3. SCENE EXECUTION LEDGER */}
       <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 md:p-6 shadow-xl backdrop-blur-sm space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-800">
           <div>
@@ -424,7 +541,7 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
               <span>Scene Execution Ledger</span>
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
-              Generate each video clip individually or sequentially. Download links appear immediately upon completion.
+              Each scene is generated with full duration under single GPU lock. Download buttons appear immediately upon completion.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -472,7 +589,7 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
                         <span className="font-mono text-[10px] text-slate-500 font-normal">[{scene.id}]</span>
                       </h4>
                       <span className="text-[11px] text-slate-400 font-mono">
-                        Target: {scene.target_duration_seconds}s • {scene.resolution || '720p'}
+                        Target Duration: {Number(scene.target_duration_seconds).toFixed(1)}s • {scene.resolution || '720p'}
                       </span>
                     </div>
                   </div>
@@ -482,11 +599,11 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
 
                     {/* ACTION BUTTONS FOR THIS SCENE */}
 
-                    {/* 1. If Pending: Direct "Generate Video N" button */}
+                    {/* 1. If Pending: Direct "Generate Video N" button (Only disabled if GPU is currently busy) */}
                     {scene.status === 'pending' && (
                       <button
                         onClick={() => handleGenerateSingle(scene.id)}
-                        disabled={isGeneratingThis || job.status === 'processing'}
+                        disabled={isGpuBusy}
                         className="px-3.5 py-1.5 rounded-lg text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 flex items-center gap-1.5 shadow-md shadow-blue-600/20 transition cursor-pointer"
                         title={`Generate Video ${idx + 1} with Wan 2.1`}
                       >
@@ -504,7 +621,7 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
                       </button>
                     )}
 
-                    {/* 2. If Done: Prominent Download Link & Preview */}
+                    {/* 2. If Done: Prominent Download Link & Preview & Next Scene Proceed */}
                     {scene.status === 'done' && (
                       <>
                         {/* Direct Download Button */}
@@ -527,12 +644,12 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
                           {isExpanded ? <ChevronUp className="w-3 h-3 ml-0.5" /> : <ChevronDown className="w-3 h-3 ml-0.5" />}
                         </button>
 
-                        {/* Next Scene Proceed Button (if next scene is pending) */}
+                        {/* Next Scene Proceed Button (if next scene is pending and GPU is free) */}
                         {nextScene && nextScene.status === 'pending' && (
                           <button
                             onClick={() => handleGenerateSingle(nextScene.id)}
-                            disabled={!!generatingSceneId || job.status === 'processing'}
-                            className="px-3.5 py-1.5 rounded-lg text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 flex items-center gap-1.5 shadow-md shadow-indigo-600/20 transition cursor-pointer"
+                            disabled={isGpuBusy}
+                            className="px-3.5 py-1.5 rounded-lg text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 flex items-center gap-1.5 shadow-md shadow-indigo-600/20 transition cursor-pointer"
                             title={`Proceed to Generate Video ${idx + 2}`}
                           >
                             <span>Proceed to Video {idx + 2}</span>
@@ -546,8 +663,8 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
                     {scene.status === 'failed' && (
                       <button
                         onClick={() => handleRetryScene(scene.id, '480p')}
-                        disabled={retryingSceneId === scene.id}
-                        className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-red-600 hover:bg-red-500 flex items-center gap-1.5 transition cursor-pointer"
+                        disabled={retryingSceneId === scene.id || isGpuBusy}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-red-600 hover:bg-red-500 disabled:opacity-50 flex items-center gap-1.5 transition cursor-pointer"
                         title="Retry only this scene at 480p"
                       >
                         <RotateCcw className="w-3.5 h-3.5" />
@@ -563,14 +680,14 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
                     <div className="flex items-center justify-between text-xs text-slate-400 font-mono">
                       <span className="flex items-center gap-1.5">
                         <Check className="w-3.5 h-3.5 text-emerald-400" />
-                        Generated Video Clip ({scene.resolution || '720p'})
+                        Generated Video Clip ({scene.resolution || '720p'} • {Number(scene.target_duration_seconds).toFixed(1)}s)
                       </span>
                       <button
                         onClick={() => handleDownloadScene(scene, idx)}
-                        className="text-xs text-blue-400 hover:text-blue-300 font-medium flex items-center gap-1"
+                        className="text-xs text-blue-400 hover:text-blue-300 font-medium flex items-center gap-1 cursor-pointer"
                       >
                         <Download className="w-3 h-3" />
-                        Download File
+                        Download File (.mp4)
                       </button>
                     </div>
                     <div className="relative rounded-lg overflow-hidden bg-slate-950 flex items-center justify-center max-h-64 aspect-video">
@@ -596,7 +713,7 @@ export const QueueMonitor: React.FC<QueueMonitorProps> = ({
                   <div>
                     <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1 flex items-center gap-1.5">
                       <Volume2 className="w-3.5 h-3.5 text-blue-400" />
-                      Voiceover Narration ({scene.target_duration_seconds}s)
+                      Voiceover Narration ({Number(scene.target_duration_seconds).toFixed(1)}s)
                     </span>
                     <p className="text-slate-300 italic leading-relaxed">"{scene.narration_text}"</p>
                   </div>

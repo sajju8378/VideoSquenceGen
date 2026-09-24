@@ -246,10 +246,13 @@ async function generateClientVideoClip(
       return;
     }
 
-    // Interval-based loop: 24 frames over 1.2 seconds
-    // Immune to browser tab backgrounding that pauses requestAnimationFrame
-    const totalFrames = 24;
+    // Interval-based loop: record at 20fps for the requested target duration
+    // Ensures real video duration in player matches scene target duration (e.g. 5s - 8s)
+    const clipSeconds = Math.max(3, Math.min(10, Math.round(Number(durationSec) || 6)));
+    const fps = 20;
+    const totalFrames = clipSeconds * fps;
     let frame = 0;
+
     const interval = setInterval(() => {
       frame++;
       const progress = Math.min(1.0, frame / totalFrames);
@@ -267,11 +270,11 @@ async function generateClientVideoClip(
           } catch {
             finish();
           }
-        }, 80);
+        }, 100);
       }
     }, 50);
 
-    // Watchdog safety timeout (max 1.8s) so nothing ever hangs
+    // Watchdog safety timeout (clipSeconds + 2s) so nothing ever hangs
     setTimeout(() => {
       clearInterval(interval);
       try {
@@ -280,7 +283,7 @@ async function generateClientVideoClip(
       } catch {
         finish();
       }
-    }, 1800);
+    }, (clipSeconds + 2) * 1000);
   });
 }
 
@@ -578,6 +581,8 @@ export const apiClient = {
 
     if (job.scenes.every(s => s.status === 'done')) {
       job.status = 'completed';
+    } else {
+      job.status = 'queued';
     }
 
     appendStoredLog(job.id, {
