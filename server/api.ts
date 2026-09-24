@@ -344,6 +344,7 @@ apiRouter.get('/config', (req: Request, res: Response) => {
     res.json({
       hasHfToken,
       tokenPreview,
+      hfToken: cfg.hf_token || '',
       hfSpace: cfg.hf_space || 'Lightricks/ltx-video-distilled',
       defaultEngine: cfg.default_engine || 'auto',
       lastUpdated: cfg.last_updated || null,

@@ -43,8 +43,9 @@ async function tryGenerateWithHuggingFace(
 
   try {
     const client = await Client.connect(spaceId, {
+      token: token,
       hf_token: (token ? (token as `hf_${string}`) : undefined),
-    });
+    } as any);
 
     const is916 = options.aspectRatio === '9:16';
     const is11 = options.aspectRatio === '1:1';
@@ -59,41 +60,92 @@ async function tryGenerateWithHuggingFace(
       height = 512;
     }
 
-    const duration = Math.max(2.0, Math.min(8.0, options.durationSeconds || 4.0));
+    const duration = Math.max(1.5, Math.min(6.0, options.durationSeconds || 3.0));
 
-    // Call /generate_video with timeout
-    const result = await Promise.race([
-      client.predict('/generate_video', {
+    // Inspect available endpoints dynamically to support various HF Spaces (LTX-Video, Wan 2.1, etc.)
+    const apiInfo = await client.view_api();
+    const endpoints = apiInfo?.named_endpoints ? Object.keys(apiInfo.named_endpoints) : [];
+    console.log(`[VideoEngine] Connected to ${spaceId}. Available endpoints: ${endpoints.join(', ')}`);
+
+    let endpointToCall = '';
+    let payload: Record<string, any> = {};
+
+    if (endpoints.includes('/text_to_video') || endpoints.includes('/image_to_video')) {
+      const useImage = !!options.imageUrl && endpoints.includes('/image_to_video');
+      endpointToCall = useImage ? '/image_to_video' : '/text_to_video';
+
+      payload = {
         prompt: options.prompt,
-        negative_prompt: 'worst quality, inconsistent motion, blurry, jittery, distorted, cartoon, low resolution',
+        negative_prompt: 'worst quality, inconsistent motion, blurry, jittery, distorted, low resolution',
+        input_image_filepath: useImage ? options.imageUrl : null,
+        input_video_filepath: null,
+        height_ui: height,
+        width_ui: width,
+        mode: useImage ? 'image-to-video' : 'text-to-video',
+        duration_ui: duration,
+        ui_frames_to_use: 9,
+        seed_ui: Math.floor(Math.random() * 100000),
+        randomize_seed: true,
+        ui_guidance_scale: 1.5,
+        improve_texture_flag: true,
+      };
+    } else if (endpoints.includes('/generate_video')) {
+      endpointToCall = '/generate_video';
+      payload = {
+        prompt: options.prompt,
+        negative_prompt: 'worst quality, inconsistent motion, blurry, jittery, distorted',
         input_image_filepath: options.imageUrl || null,
         height_ui: height,
         width_ui: width,
         duration_ui: duration,
         seed_ui: Math.floor(Math.random() * 100000),
         randomize_seed: true,
-        ui_guidance_scale: 3.0,
+        ui_guidance_scale: 2.0,
         improve_texture_flag: true,
-      }),
+      };
+    } else if (endpoints.length > 0) {
+      // Pick first generation endpoint
+      endpointToCall = endpoints.find(e => e.includes('t2v') || e.includes('video') || e.includes('generate')) || endpoints[0];
+      payload = { prompt: options.prompt };
+    }
+
+    if (!endpointToCall) {
+      throw new Error(`No compatible video generation endpoint found on ${spaceId}`);
+    }
+
+    console.log(`[VideoEngine] Calling HF endpoint ${endpointToCall} with prompt: "${options.prompt.slice(0, 60)}..."`);
+
+    // Call predict with a 60s timeout
+    const result = (await Promise.race([
+      client.predict(endpointToCall as any, payload),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Hugging Face Space generation timed out after 45s')), 45000)
+        setTimeout(() => reject(new Error('Hugging Face Space generation timed out after 60s')), 60000)
       ),
-    ]) as any;
+    ])) as any;
 
     if (result && result.data) {
-      const videoData = result.data[0];
-      const videoUrl = typeof videoData === 'string' ? videoData : videoData?.video?.url || videoData?.video?.path || videoData?.url;
+      const first = result.data[0];
+      let videoUrl: string | null = null;
+
+      if (typeof first === 'string') {
+        videoUrl = first;
+      } else if (first?.video?.url) {
+        videoUrl = first.video.url;
+      } else if (first?.video?.path) {
+        videoUrl = first.video.path;
+      } else if (first?.url) {
+        videoUrl = first.url;
+      }
 
       if (videoUrl) {
-        console.log(`[VideoEngine] Hugging Face generated video URL: ${videoUrl}`);
-        // Download generated video from HF
+        console.log(`[VideoEngine] Hugging Face generated real video URL: ${videoUrl}`);
         const response = await fetch(videoUrl, {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
         });
 
         if (response.ok) {
           const buffer = Buffer.from(await response.arrayBuffer());
-          if (buffer.length > 50000) {
+          if (buffer.length > 5000) {
             await fs.promises.writeFile(destPath, buffer);
             console.log(`[VideoEngine] Hugging Face video successfully saved to ${destPath} (${(buffer.length / 1024 / 1024).toFixed(2)} MB)`);
             return true;
