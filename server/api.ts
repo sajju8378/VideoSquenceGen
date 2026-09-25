@@ -172,6 +172,7 @@ apiRouter.post(['/jobs/:id/retry-scene', '/jobs/:id/scenes/:sceneId/generate'], 
     if (!sceneId) return res.status(400).json({ error: 'sceneId is required' });
 
     dbService.resetSceneForRetry(sceneId);
+    dbService.updateJobStatus(req.params.id, 'processing');
 
     // Process scene in background or foreground
     processScene(sceneId, { forcedResolution }).then(() => {

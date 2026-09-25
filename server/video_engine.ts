@@ -3,7 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { Client } from '@gradio/client';
+import { Client, handle_file } from '@gradio/client';
 import { getHfToken, getServerConfig } from './settings.ts';
 import { enrichPromptWithBackgroundAndCinematics } from '../src/services/apiClient.ts';
 
@@ -29,7 +29,71 @@ export interface GenerateVideoResult {
 }
 
 /**
- * Attempts generation via Hugging Face Space (LTX-Video or Wan 2.1)
+ * Downloads and writes the video result from Gradio prediction to destPath
+ */
+async function saveGradioVideoResult(
+  result: any,
+  destPath: string,
+  token?: string
+): Promise<boolean> {
+  if (!result || !result.data || !result.data[0]) {
+    return false;
+  }
+
+  const first = result.data[0];
+  let videoUrl: string | null = null;
+
+  if (typeof first === 'string') {
+    videoUrl = first;
+  } else if (first?.video?.url) {
+    videoUrl = first.video.url;
+  } else if (first?.video?.path) {
+    videoUrl = first.video.path;
+  } else if (first?.url) {
+    videoUrl = first.url;
+  }
+
+  if (!videoUrl) return false;
+
+  console.log(`[VideoEngine] Hugging Face generated real video URL: ${videoUrl}`);
+
+  // If local file on disk
+  if (fs.existsSync(videoUrl)) {
+    await fs.promises.copyFile(videoUrl, destPath);
+    console.log(`[VideoEngine] Local file copied to ${destPath}`);
+    return true;
+  }
+
+  // If HTTP URL, fetch stream
+  try {
+    let response = await fetch(videoUrl, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+
+    // If token header rejected on static file server, retry public fetch
+    if (!response.ok && token) {
+      response = await fetch(videoUrl);
+    }
+
+    if (response.ok) {
+      const buffer = Buffer.from(await response.arrayBuffer());
+      if (buffer.length > 5000) {
+        await fs.promises.writeFile(destPath, buffer);
+        console.log(
+          `[VideoEngine] Hugging Face video successfully saved to ${destPath} (${(buffer.length / 1024 / 1024).toFixed(2)} MB)`
+        );
+        return true;
+      }
+    }
+  } catch (downloadErr: any) {
+    console.warn(`[VideoEngine] Failed to download video URL ${videoUrl}:`, downloadErr.message);
+  }
+
+  return false;
+}
+
+/**
+ * Attempts real AI video generation via Hugging Face Space (LTX-Video or Wan 2.1)
  */
 async function tryGenerateWithHuggingFace(
   options: GenerateVideoOptions,
@@ -67,21 +131,70 @@ async function tryGenerateWithHuggingFace(
     const endpoints = apiInfo?.named_endpoints ? Object.keys(apiInfo.named_endpoints) : [];
     console.log(`[VideoEngine] Connected to ${spaceId}. Available endpoints: ${endpoints.join(', ')}`);
 
-    let endpointToCall = '';
-    let payload: Record<string, any> = {};
+    // 1. Try Image-to-Video if image is provided
+    const hasImage = !!options.imageUrl && typeof options.imageUrl === 'string' && options.imageUrl.trim().length > 0;
+    if (hasImage && endpoints.includes('/image_to_video')) {
+      try {
+        console.log(`[VideoEngine] Attempting /image_to_video with conditioning image...`);
+        let fileInput: any = null;
 
-    if (endpoints.includes('/text_to_video') || endpoints.includes('/image_to_video')) {
-      const useImage = !!options.imageUrl && endpoints.includes('/image_to_video');
-      endpointToCall = useImage ? '/image_to_video' : '/text_to_video';
+        if (options.imageUrl!.startsWith('data:')) {
+          const matches = options.imageUrl!.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+          if (matches && matches[2]) {
+            const buf = Buffer.from(matches[2], 'base64');
+            const tmpFile = path.join(os.tmpdir(), `hf_img_${Date.now()}_${Math.random().toString(36).substring(2, 6)}.png`);
+            await fs.promises.writeFile(tmpFile, buf);
+            fileInput = handle_file(tmpFile);
+          }
+        } else if (options.imageUrl!.startsWith('http')) {
+          fileInput = handle_file(options.imageUrl!);
+        } else if (fs.existsSync(options.imageUrl!)) {
+          fileInput = handle_file(options.imageUrl!);
+        }
 
-      payload = {
+        if (fileInput) {
+          const imgPayload = {
+            prompt: options.prompt,
+            negative_prompt: 'worst quality, inconsistent motion, blurry, jittery, distorted, low resolution',
+            input_image_filepath: fileInput,
+            input_video_filepath: null,
+            height_ui: height,
+            width_ui: width,
+            mode: 'image-to-video',
+            duration_ui: duration,
+            ui_frames_to_use: 9,
+            seed_ui: Math.floor(Math.random() * 100000),
+            randomize_seed: true,
+            ui_guidance_scale: 1.5,
+            improve_texture_flag: true,
+          };
+
+          const imgResult = (await Promise.race([
+            client.predict('/image_to_video' as any, imgPayload),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('Hugging Face /image_to_video timed out')), 75000)
+            ),
+          ])) as any;
+
+          const saved = await saveGradioVideoResult(imgResult, destPath, token);
+          if (saved) return true;
+        }
+      } catch (imgErr: any) {
+        console.warn(`[VideoEngine] /image_to_video failed: ${imgErr.message}. Automatically trying /text_to_video...`);
+      }
+    }
+
+    // 2. Try Text-to-Video (Extremely reliable for LTX-Video distilled, generates real diffusion MP4 in ~18s)
+    if (endpoints.includes('/text_to_video')) {
+      console.log(`[VideoEngine] Calling HF /text_to_video with prompt: "${options.prompt.slice(0, 60)}..."`);
+      const txtPayload = {
         prompt: options.prompt,
         negative_prompt: 'worst quality, inconsistent motion, blurry, jittery, distorted, low resolution',
-        input_image_filepath: useImage ? options.imageUrl : null,
+        input_image_filepath: null,
         input_video_filepath: null,
         height_ui: height,
         width_ui: width,
-        mode: useImage ? 'image-to-video' : 'text-to-video',
+        mode: 'text-to-video',
         duration_ui: duration,
         ui_frames_to_use: 9,
         seed_ui: Math.floor(Math.random() * 100000),
@@ -89,12 +202,22 @@ async function tryGenerateWithHuggingFace(
         ui_guidance_scale: 1.5,
         improve_texture_flag: true,
       };
+
+      const txtResult = (await Promise.race([
+        client.predict('/text_to_video' as any, txtPayload),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Hugging Face /text_to_video timed out')), 75000)
+        ),
+      ])) as any;
+
+      const saved = await saveGradioVideoResult(txtResult, destPath, token);
+      if (saved) return true;
     } else if (endpoints.includes('/generate_video')) {
-      endpointToCall = '/generate_video';
-      payload = {
+      // Spaces that expose /generate_video
+      const genPayload = {
         prompt: options.prompt,
         negative_prompt: 'worst quality, inconsistent motion, blurry, jittery, distorted',
-        input_image_filepath: options.imageUrl || null,
+        input_image_filepath: null,
         height_ui: height,
         width_ui: width,
         duration_ui: duration,
@@ -103,58 +226,19 @@ async function tryGenerateWithHuggingFace(
         ui_guidance_scale: 2.0,
         improve_texture_flag: true,
       };
-    } else if (endpoints.length > 0) {
-      // Pick first generation endpoint
-      endpointToCall = endpoints.find(e => e.includes('t2v') || e.includes('video') || e.includes('generate')) || endpoints[0];
-      payload = { prompt: options.prompt };
-    }
 
-    if (!endpointToCall) {
-      throw new Error(`No compatible video generation endpoint found on ${spaceId}`);
-    }
+      const genResult = (await Promise.race([
+        client.predict('/generate_video' as any, genPayload),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Hugging Face /generate_video timed out')), 75000)
+        ),
+      ])) as any;
 
-    console.log(`[VideoEngine] Calling HF endpoint ${endpointToCall} with prompt: "${options.prompt.slice(0, 60)}..."`);
-
-    // Call predict with a 60s timeout
-    const result = (await Promise.race([
-      client.predict(endpointToCall as any, payload),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Hugging Face Space generation timed out after 60s')), 60000)
-      ),
-    ])) as any;
-
-    if (result && result.data) {
-      const first = result.data[0];
-      let videoUrl: string | null = null;
-
-      if (typeof first === 'string') {
-        videoUrl = first;
-      } else if (first?.video?.url) {
-        videoUrl = first.video.url;
-      } else if (first?.video?.path) {
-        videoUrl = first.video.path;
-      } else if (first?.url) {
-        videoUrl = first.url;
-      }
-
-      if (videoUrl) {
-        console.log(`[VideoEngine] Hugging Face generated real video URL: ${videoUrl}`);
-        const response = await fetch(videoUrl, {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-        });
-
-        if (response.ok) {
-          const buffer = Buffer.from(await response.arrayBuffer());
-          if (buffer.length > 5000) {
-            await fs.promises.writeFile(destPath, buffer);
-            console.log(`[VideoEngine] Hugging Face video successfully saved to ${destPath} (${(buffer.length / 1024 / 1024).toFixed(2)} MB)`);
-            return true;
-          }
-        }
-      }
+      const saved = await saveGradioVideoResult(genResult, destPath, token);
+      if (saved) return true;
     }
   } catch (err: any) {
-    console.warn(`[VideoEngine] Hugging Face generation skipped/failed: ${err.message}. Falling back to accelerated motion engine.`);
+    console.warn(`[VideoEngine] Hugging Face generation error: ${err.message}`);
   }
 
   return false;

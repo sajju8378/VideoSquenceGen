@@ -5,17 +5,18 @@ import { getZeroGPUPythonAppCode, getZeroGPURequirementsTxt, getZeroGPUReadme } 
 let isBackendAvailable: boolean | null = null;
 
 export async function checkBackendAvailability(): Promise<boolean> {
-  if (isBackendAvailable !== null) return isBackendAvailable;
+  if (isBackendAvailable === true) return true;
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 2000);
+    const timeout = setTimeout(() => controller.abort(), 4000);
     const res = await fetch('/api/jobs', { signal: controller.signal });
     clearTimeout(timeout);
-    isBackendAvailable = res.ok;
-  } catch {
-    isBackendAvailable = false;
-  }
-  return isBackendAvailable;
+    if (res.ok) {
+      isBackendAvailable = true;
+      return true;
+    }
+  } catch {}
+  return false;
 }
 
 // Client-side local storage fallback for static deployments (e.g. GitHub Pages)
@@ -64,7 +65,7 @@ export async function generateClientHfVideo(
   duration: number = 4,
   onProgress?: (status: string) => void
 ): Promise<string> {
-  onProgress?.(`Connecting browser to Hugging Face Space: ${spaceName}...`);
+  onProgress?.(`Connecting to Hugging Face Space: ${spaceName}...`);
   const { Client } = await import('@gradio/client');
   const client = await Client.connect(spaceName, {
     hf_token: token ? (token as `hf_${string}`) : undefined,
@@ -84,26 +85,53 @@ export async function generateClientHfVideo(
     height = 512;
   }
 
-  onProgress?.('Generating video diffusion frames with LTX-Video...');
+  onProgress?.('Generating real video diffusion frames with LTX-Video on ZeroGPU...');
 
-  const result = await (client.predict as any)('/generate_video', {
-    prompt: prompt,
-    negative_prompt: 'worst quality, inconsistent motion, blurry, jittery, distorted, cartoon, low resolution',
-    input_image_filepath: null,
-    height_ui: height,
-    width_ui: width,
-    duration_ui: Math.max(2, Math.min(8, duration)),
-    seed_ui: Math.floor(Math.random() * 100000),
-    randomize_seed: true,
-    ui_guidance_scale: 3.0,
-    improve_texture_flag: true,
-  });
+  const apiInfo = await client.view_api();
+  const endpoints = apiInfo?.named_endpoints ? Object.keys(apiInfo.named_endpoints) : [];
+
+  let result: any = null;
+
+  if (endpoints.includes('/text_to_video')) {
+    result = await (client.predict as any)('/text_to_video', {
+      prompt: prompt,
+      negative_prompt: 'worst quality, inconsistent motion, blurry, jittery, distorted, low resolution',
+      input_image_filepath: null,
+      input_video_filepath: null,
+      height_ui: height,
+      width_ui: width,
+      mode: 'text-to-video',
+      duration_ui: Math.max(1.5, Math.min(8.0, duration)),
+      ui_frames_to_use: 9,
+      seed_ui: Math.floor(Math.random() * 100000),
+      randomize_seed: true,
+      ui_guidance_scale: 1.5,
+      improve_texture_flag: true,
+    });
+  } else if (endpoints.includes('/generate_video')) {
+    result = await (client.predict as any)('/generate_video', {
+      prompt: prompt,
+      negative_prompt: 'worst quality, inconsistent motion, blurry, jittery, distorted, cartoon, low resolution',
+      input_image_filepath: null,
+      height_ui: height,
+      width_ui: width,
+      duration_ui: Math.max(2, Math.min(8, duration)),
+      seed_ui: Math.floor(Math.random() * 100000),
+      randomize_seed: true,
+      ui_guidance_scale: 2.0,
+      improve_texture_flag: true,
+    });
+  } else {
+    const ep = endpoints.find(e => e.includes('t2v') || e.includes('video') || e.includes('generate')) || endpoints[0];
+    if (!ep) throw new Error(`No compatible video generation endpoint on ${spaceName}`);
+    result = await (client.predict as any)(ep, { prompt });
+  }
 
   if (result && result.data && result.data[0]) {
     const v = result.data[0];
-    const videoUrl = typeof v === 'string' ? v : v?.video?.url || v?.url;
+    const videoUrl = typeof v === 'string' ? v : v?.video?.url || v?.video?.path || v?.url;
     if (videoUrl) {
-      onProgress?.('Video generation completed! Downloading MP4 stream...');
+      onProgress?.('Diffusion video generation completed! MP4 ready.');
       return videoUrl;
     }
   }
@@ -1193,9 +1221,20 @@ export const apiClient = {
           saveStoredJobs(jobs);
           this.notifyUpdate(job.id);
 
-          // Generate dynamic video clip for client
+          // Generate real diffusion video clip for client
           let clipUrl = '';
           try {
+            const token = getClientHfToken();
+            const space = getClientHfSpace();
+            clipUrl = await generateClientHfVideo(
+              scene.visual_prompt,
+              token,
+              space,
+              job.aspect_ratio,
+              scene.target_duration_seconds
+            );
+          } catch (hfErr) {
+            console.warn('Real HF ZeroGPU generation error, falling back to keyframe renderer:', hfErr);
             clipUrl = await generateClientVideoClip(
               scene.visual_prompt,
               scene.target_duration_seconds,
@@ -1206,8 +1245,6 @@ export const apiClient = {
               scene.image_url || undefined,
               abortController.signal
             );
-          } catch (clipErr) {
-            console.warn('Clip generation encountered error:', clipErr);
           }
 
           if (cancelledQueueJobIds.has(job.id) || abortController.signal.aborted) {
@@ -1482,6 +1519,17 @@ export const apiClient = {
       // 2. Generate video clip
       let clipUrl = '';
       try {
+        const token = getClientHfToken();
+        const space = getClientHfSpace();
+        clipUrl = await generateClientHfVideo(
+          scene.visual_prompt,
+          token,
+          space,
+          job.aspect_ratio,
+          scene.target_duration_seconds
+        );
+      } catch (hfErr) {
+        console.warn('Real HF ZeroGPU generation error, falling back to keyframe renderer:', hfErr);
         clipUrl = await generateClientVideoClip(
           scene.visual_prompt,
           scene.target_duration_seconds,
@@ -1492,8 +1540,6 @@ export const apiClient = {
           scene.image_url || undefined,
           abortController.signal
         );
-      } catch (err) {
-        console.warn('Single scene generation caught error:', err);
       }
 
       if (cancelledQueueJobIds.has(jobId) || abortController.signal.aborted) {

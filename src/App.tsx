@@ -78,9 +78,10 @@ export default function App() {
     };
     window.addEventListener('wanscript_update', handleUpdate);
 
-    // Poll every 1.2 seconds if processing
+    // Poll every 1.2 seconds if processing or any scene is generating
+    const isGenerating = currentJob?.status === 'processing' || currentJob?.scenes?.some(s => s.status === 'generating');
     const interval = setInterval(() => {
-      if (currentJob?.status === 'processing') {
+      if (isGenerating) {
         fetchActiveJob();
       }
     }, 1200);
@@ -89,7 +90,7 @@ export default function App() {
       window.removeEventListener('wanscript_update', handleUpdate);
       clearInterval(interval);
     };
-  }, [activeJobId, currentJob?.status]);
+  }, [activeJobId, currentJob?.status, currentJob?.scenes]);
 
   const handleJobCreated = (jobId: string) => {
     setActiveJobId(jobId);
