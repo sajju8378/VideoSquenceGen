@@ -36,11 +36,13 @@ export async function assembleFinalVideo(
       const muxedPath = path.join(clipsDir, `muxed_${scene.id}.mp4`);
 
       if (scene.audio_path && fs.existsSync(scene.audio_path)) {
-        // Mux video clip with narration audio, pad with shortest/longest
+        // Mux video clip with narration audio
         await execFileAsync('/usr/bin/ffmpeg', [
           '-y',
           '-i', scene.output_path!,
           '-i', scene.audio_path,
+          '-map', '0:v:0',
+          '-map', '1:a:0',
           '-c:v', 'copy',
           '-c:a', 'aac',
           '-b:a', '192k',
@@ -49,15 +51,13 @@ export async function assembleFinalVideo(
         ]);
         muxedClipPaths.push(muxedPath);
       } else {
-        // Generate silent audio track if missing
+        // Use video as-is or ensure valid audio container
         await execFileAsync('/usr/bin/ffmpeg', [
           '-y',
           '-i', scene.output_path!,
-          '-f', 'lavfi',
-          '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100',
           '-c:v', 'copy',
           '-c:a', 'aac',
-          '-shortest',
+          '-b:a', '192k',
           muxedPath,
         ]);
         muxedClipPaths.push(muxedPath);

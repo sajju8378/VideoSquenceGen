@@ -63,10 +63,11 @@ export async function generateClientHfVideo(
   spaceName: string = 'Lightricks/ltx-video-distilled',
   aspectRatio: '16:9' | '9:16' | '1:1' = '16:9',
   duration: number = 4,
+  imageUrl?: string,
   onProgress?: (status: string) => void
 ): Promise<string> {
   onProgress?.(`Connecting to Hugging Face Space: ${spaceName}...`);
-  const { Client } = await import('@gradio/client');
+  const { Client, handle_file } = await import('@gradio/client');
   const client = await Client.connect(spaceName, {
     hf_token: token ? (token as `hf_${string}`) : undefined,
   });
@@ -85,46 +86,88 @@ export async function generateClientHfVideo(
     height = 512;
   }
 
-  onProgress?.('Generating real video diffusion frames with LTX-Video on ZeroGPU...');
-
   const apiInfo = await client.view_api();
   const endpoints = apiInfo?.named_endpoints ? Object.keys(apiInfo.named_endpoints) : [];
 
   let result: any = null;
 
-  if (endpoints.includes('/text_to_video')) {
-    result = await (client.predict as any)('/text_to_video', {
-      prompt: prompt,
-      negative_prompt: 'worst quality, inconsistent motion, blurry, jittery, distorted, low resolution',
-      input_image_filepath: null,
-      input_video_filepath: null,
-      height_ui: height,
-      width_ui: width,
-      mode: 'text-to-video',
-      duration_ui: Math.max(1.5, Math.min(8.0, duration)),
-      ui_frames_to_use: 9,
-      seed_ui: Math.floor(Math.random() * 100000),
-      randomize_seed: true,
-      ui_guidance_scale: 1.5,
-      improve_texture_flag: true,
-    });
-  } else if (endpoints.includes('/generate_video')) {
-    result = await (client.predict as any)('/generate_video', {
-      prompt: prompt,
-      negative_prompt: 'worst quality, inconsistent motion, blurry, jittery, distorted, cartoon, low resolution',
-      input_image_filepath: null,
-      height_ui: height,
-      width_ui: width,
-      duration_ui: Math.max(2, Math.min(8, duration)),
-      seed_ui: Math.floor(Math.random() * 100000),
-      randomize_seed: true,
-      ui_guidance_scale: 2.0,
-      improve_texture_flag: true,
-    });
-  } else {
-    const ep = endpoints.find(e => e.includes('t2v') || e.includes('video') || e.includes('generate')) || endpoints[0];
-    if (!ep) throw new Error(`No compatible video generation endpoint on ${spaceName}`);
-    result = await (client.predict as any)(ep, { prompt });
+  // 1. If image is provided, try image-to-video first
+  const hasImage = !!imageUrl && typeof imageUrl === 'string' && imageUrl.trim().length > 0;
+  if (hasImage && endpoints.includes('/image_to_video')) {
+    try {
+      onProgress?.('Preparing keyframe image for ZeroGPU image-to-video...');
+      let fileInput: any = null;
+      if (imageUrl.startsWith('data:') || imageUrl.startsWith('blob:')) {
+        const res = await fetch(imageUrl);
+        const blob = await res.blob();
+        fileInput = handle_file(blob);
+      } else if (imageUrl.startsWith('http')) {
+        fileInput = handle_file(imageUrl);
+      }
+
+      if (fileInput) {
+        onProgress?.('Generating image-to-video diffusion frames on ZeroGPU...');
+        result = await (client.predict as any)('/image_to_video', {
+          prompt: prompt,
+          negative_prompt: 'worst quality, inconsistent motion, blurry, jittery, distorted, low resolution',
+          input_image_filepath: fileInput,
+          input_video_filepath: null,
+          height_ui: height,
+          width_ui: width,
+          mode: 'image-to-video',
+          duration_ui: Math.max(1.5, Math.min(8.0, duration)),
+          ui_frames_to_use: 9,
+          seed_ui: Math.floor(Math.random() * 100000),
+          randomize_seed: true,
+          ui_guidance_scale: 1.5,
+          improve_texture_flag: true,
+        });
+      }
+    } catch (imgErr: any) {
+      console.warn('Image-to-video failed, falling back to text-to-video diffusion:', imgErr.message);
+      onProgress?.('Image-to-video skipped. Generating text-to-video diffusion...');
+      result = null;
+    }
+  }
+
+  // 2. If no image result yet, run text-to-video diffusion
+  if (!result || !result.data || !result.data[0]) {
+    onProgress?.('Generating real video diffusion frames with LTX-Video on ZeroGPU...');
+
+    if (endpoints.includes('/text_to_video')) {
+      result = await (client.predict as any)('/text_to_video', {
+        prompt: prompt,
+        negative_prompt: 'worst quality, inconsistent motion, blurry, jittery, distorted, low resolution',
+        input_image_filepath: null,
+        input_video_filepath: null,
+        height_ui: height,
+        width_ui: width,
+        mode: 'text-to-video',
+        duration_ui: Math.max(1.5, Math.min(8.0, duration)),
+        ui_frames_to_use: 9,
+        seed_ui: Math.floor(Math.random() * 100000),
+        randomize_seed: true,
+        ui_guidance_scale: 1.5,
+        improve_texture_flag: true,
+      });
+    } else if (endpoints.includes('/generate_video')) {
+      result = await (client.predict as any)('/generate_video', {
+        prompt: prompt,
+        negative_prompt: 'worst quality, inconsistent motion, blurry, jittery, distorted, cartoon, low resolution',
+        input_image_filepath: null,
+        height_ui: height,
+        width_ui: width,
+        duration_ui: Math.max(2, Math.min(8, duration)),
+        seed_ui: Math.floor(Math.random() * 100000),
+        randomize_seed: true,
+        ui_guidance_scale: 2.0,
+        improve_texture_flag: true,
+      });
+    } else {
+      const ep = endpoints.find(e => e.includes('t2v') || e.includes('video') || e.includes('generate')) || endpoints[0];
+      if (!ep) throw new Error(`No compatible video generation endpoint on ${spaceName}`);
+      result = await (client.predict as any)(ep, { prompt });
+    }
   }
 
   if (result && result.data && result.data[0]) {
@@ -508,396 +551,6 @@ export function getSceneConditioningImageUrl(
   return `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&seed=${seed}&model=flux&nologo=true`;
 }
 
-// Helper: Generate modern 2026 photorealistic cinematic video clip with camera motion and audio
-async function generateClientVideoClip(
-  text: string,
-  durationSec: number,
-  resolution: string,
-  aspectRatio: '16:9' | '9:16' | '1:1',
-  sceneIndex: number = 0,
-  narrationText: string = '',
-  customImageUrl?: string,
-  signal?: AbortSignal
-): Promise<string> {
-  if (signal?.aborted) return '';
-
-  // True High-Definition canvas dimensions (1280x720 for 720p, 1920x1080 for 1080p)
-  const is1080p = resolution === '1080p';
-  const width = aspectRatio === '9:16' ? (is1080p ? 720 : 540) : aspectRatio === '1:1' ? (is1080p ? 1080 : 720) : (is1080p ? 1920 : 1280);
-  const height = aspectRatio === '9:16' ? (is1080p ? 1280 : 960) : aspectRatio === '1:1' ? (is1080p ? 1080 : 720) : (is1080p ? 1080 : 720);
-
-  const cleanSubject = text
-    .replace(/^cinematic wan 2\.1 video of:?/i, '')
-    .replace(/wan 2\.1/gi, '')
-    .trim();
-  const seed = Math.abs(text.split('').reduce((acc, c) => (acc * 33 + c.charCodeAt(0)) | 0, sceneIndex * 1337 + 7));
-
-  let img: HTMLImageElement | null = null;
-
-  // 1. If user provided their own uploaded image, load it directly
-  if (customImageUrl && (customImageUrl.startsWith('data:') || customImageUrl.startsWith('blob:') || customImageUrl.includes('/uploads/'))) {
-    img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.src = customImageUrl;
-    await new Promise<void>(resolve => {
-      if (img!.complete && img!.naturalWidth > 0) return resolve();
-      img!.onload = () => resolve();
-      img!.onerror = () => resolve();
-      setTimeout(resolve, 3000);
-    });
-  } else {
-    // 2. Otherwise load distinct visual for THIS specific scene via diffusion pipeline
-    const cacheKey = `${text}_${sceneIndex}_${aspectRatio}`;
-    if (sceneImageCache.has(cacheKey) && sceneImageCache.get(cacheKey)!.complete && sceneImageCache.get(cacheKey)!.naturalWidth > 0) {
-      img = sceneImageCache.get(cacheKey)!;
-    } else {
-      img = await loadDiffusionImageViaBlob(text, width, height, seed, signal);
-      if (img) {
-        sceneImageCache.set(cacheKey, img);
-      }
-    }
-  }
-
-  if (signal?.aborted) return '';
-
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return '';
-
-  const clipSeconds = Math.max(3.5, Math.min(10, Math.round(Number(durationSec) || 5)));
-
-  // Pre-seed deterministic divine aura & atmospheric floating embers
-  const particleCount = 42;
-  const particles = Array.from({ length: particleCount }, (_, i) => {
-    const pSeed = (seed * 19 + i * 37) % 10000;
-    return {
-      startX: (pSeed % 1000) / 1000,
-      startY: ((pSeed * 7) % 1000) / 1000,
-      speed: 0.25 + (((pSeed * 13) % 100) / 100) * 0.45,
-      driftFreq: 2 + (i % 4),
-      driftAmp: 0.02 + (((pSeed * 17) % 100) / 100) * 0.04,
-      radius: 1.8 + (((pSeed * 23) % 100) / 100) * 3.5,
-      hue: (i % 3 === 0) ? 42 : (i % 3 === 1) ? 36 : 48, // Golden amber hues
-      alpha: 0.35 + (((pSeed * 31) % 100) / 100) * 0.5,
-    };
-  });
-
-  const drawSceneVisual = (progress: number) => {
-    ctx.clearRect(0, 0, width, height);
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-
-    // Modern 2026 Photorealistic Cinematic Presentation: Smooth 3D Ken Burns Motion
-    if (img && img.complete && img.naturalWidth > 0) {
-      ctx.save();
-
-      // Smooth cinematic cubic easing
-      const ep = progress < 0.5
-        ? 4 * progress * progress * progress
-        : 1 - Math.pow(-2 * progress + 2, 3) / 2;
-
-      // Dynamic shot selection per scene index
-      const shotType = sceneIndex % 4;
-      let zoom = 1.15;
-      let panX = 0;
-      let panY = 0;
-
-      if (shotType === 0) {
-        // Dramatic Hero Push-In & Upward Tilt towards crown/sky
-        zoom = 1.08 + ep * 0.32;
-        panY = (0.08 - ep * 0.16) * height;
-        panX = Math.sin(progress * Math.PI) * (width * 0.04);
-      } else if (shotType === 1) {
-        // Dynamic Flight Tracking / Sweeping Pan Across Horizon & Sea
-        zoom = 1.14 + ep * 0.26;
-        panX = (ep - 0.5) * (width * 0.18);
-        panY = (0.04 - ep * 0.08) * height;
-      } else if (shotType === 2) {
-        // Epic Power Pull-Back & Reveal (hero close-up pulling back to vast epic expanse)
-        zoom = 1.38 - ep * 0.28;
-        panY = (-0.08 + ep * 0.12) * height;
-        panX = (0.5 - ep) * (width * 0.08);
-      } else {
-        // 2.5D Aerial Orbital Drift
-        zoom = 1.12 + Math.sin(progress * Math.PI) * 0.22;
-        panX = (0.5 - ep) * (width * 0.16);
-        panY = Math.cos(progress * Math.PI) * (height * 0.04);
-      }
-
-      // Micro handheld 35mm IMAX camera breathing
-      const breathX = Math.sin(progress * Math.PI * 6) * (width * 0.003);
-      const breathY = Math.cos(progress * Math.PI * 4) * (height * 0.003);
-
-      ctx.translate(width / 2 + panX + breathX, height / 2 + panY + breathY);
-      ctx.scale(zoom, zoom);
-      ctx.drawImage(img, -width / 2, -height / 2, width, height);
-      ctx.restore();
-
-      // 1. Dynamic Volumetric God Rays / Celestial Sunbeams (Sweeping across the sky)
-      ctx.save();
-      const raySourceX = width * 0.5 + Math.sin(progress * Math.PI * 2) * (width * 0.15);
-      const raySourceY = height * 0.18;
-      const rayAngleOffset = (progress - 0.5) * 0.3;
-      for (let r = 0; r < 5; r++) {
-        const baseAngle = (r - 2) * 0.35 + rayAngleOffset;
-        const rayLen = width * 1.2;
-        const rx2 = raySourceX + Math.sin(baseAngle) * rayLen;
-        const ry2 = raySourceY + Math.cos(baseAngle) * rayLen;
-
-        const rayGrad = ctx.createLinearGradient(raySourceX, raySourceY, rx2, ry2);
-        const rayIntensity = (0.06 + Math.sin(progress * Math.PI * 3 + r) * 0.03);
-        rayGrad.addColorStop(0, `rgba(255, 235, 170, ${rayIntensity * 1.5})`);
-        rayGrad.addColorStop(0.5, `rgba(255, 210, 120, ${rayIntensity * 0.7})`);
-        rayGrad.addColorStop(1, 'rgba(255, 200, 100, 0)');
-
-        ctx.fillStyle = rayGrad;
-        ctx.beginPath();
-        ctx.moveTo(raySourceX, raySourceY);
-        ctx.lineTo(rx2 - width * 0.08, ry2);
-        ctx.lineTo(rx2 + width * 0.08, ry2);
-        ctx.closePath();
-        ctx.fill();
-      }
-      ctx.restore();
-
-      // 2. Divine Rising Aura Particles / Golden Embers (Animated at 30 FPS)
-      ctx.save();
-      for (const p of particles) {
-        // Continuous upward floating motion with sinusoidal sway
-        const currentYNorm = ((p.startY - progress * p.speed * 2) % 1 + 1) % 1;
-        const px = (p.startX * width + Math.sin(progress * Math.PI * p.driftFreq + p.startY * 10) * (width * p.driftAmp));
-        const py = currentYNorm * height;
-        const pRadius = p.radius * (0.8 + Math.sin(progress * Math.PI * 4 + p.startX * 5) * 0.3);
-
-        const pGrad = ctx.createRadialGradient(px, py, 0, px, py, pRadius * 2.8);
-        pGrad.addColorStop(0, `hsla(${p.hue}, 100%, 75%, ${p.alpha})`);
-        pGrad.addColorStop(0.4, `hsla(${p.hue}, 95%, 60%, ${p.alpha * 0.6})`);
-        pGrad.addColorStop(1, `hsla(${p.hue}, 90%, 50%, 0)`);
-
-        ctx.fillStyle = pGrad;
-        ctx.beginPath();
-        ctx.arc(px, py, pRadius * 2.8, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.restore();
-
-      // 3. Cinematic Atmospheric Horizon Mist & Dynamic Flare
-      ctx.save();
-      const mistGrad = ctx.createLinearGradient(0, height * 0.72, 0, height);
-      const mistAlpha = 0.14 + Math.sin(progress * Math.PI * 2) * 0.04;
-      mistGrad.addColorStop(0, 'rgba(20, 30, 48, 0)');
-      mistGrad.addColorStop(1, `rgba(25, 40, 65, ${mistAlpha})`);
-      ctx.fillStyle = mistGrad;
-      ctx.fillRect(0, height * 0.7, width, height * 0.3);
-
-      // Warm radial lens flare drifting across the frame
-      const flareX = width * (0.15 + progress * 0.7);
-      const flareY = height * (0.22 + Math.sin(progress * Math.PI) * 0.08);
-      const flareGrad = ctx.createRadialGradient(flareX, flareY, 5, flareX, flareY, width * 0.55);
-      flareGrad.addColorStop(0, 'rgba(255, 245, 215, 0.18)');
-      flareGrad.addColorStop(0.35, 'rgba(255, 205, 120, 0.07)');
-      flareGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-      ctx.fillStyle = flareGrad;
-      ctx.fillRect(0, 0, width, height);
-      ctx.restore();
-    } else {
-      // Atmospheric scenic fallback (pure lighting and waves, no cartoon shapes)
-      drawAtmosphericScenicFallback(ctx, width, height, progress);
-    }
-
-    // Modern Minimalist Subtitles (Clean Apple TV / Netflix style, NO retro box)
-    const subText = narrationText || cleanSubject;
-    if (subText && subText.length > 0) {
-      const cleanSub = subText.substring(0, 110);
-      ctx.save();
-      const fontSize = Math.max(14, Math.round(width * 0.022));
-      ctx.font = `600 ${fontSize}px system-ui, -apple-system, sans-serif`;
-      const textMetrics = ctx.measureText(cleanSub);
-      const pillWidth = Math.min(width - 40, textMetrics.width + 36);
-      const pillHeight = fontSize + 18;
-      const pillX = (width - pillWidth) / 2;
-      const pillY = height - pillHeight - 24;
-
-      ctx.fillStyle = 'rgba(10, 15, 28, 0.72)';
-      ctx.beginPath();
-      ctx.roundRect(pillX, pillY, pillWidth, pillHeight, pillHeight / 2);
-      ctx.fill();
-
-      ctx.fillStyle = '#ffffff';
-      ctx.shadowColor = 'rgba(0, 0, 0, 0.75)';
-      ctx.shadowBlur = 4;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(cleanSub, width / 2, pillY + pillHeight / 2);
-      ctx.restore();
-    }
-  };
-
-  // If MediaRecorder is unsupported, return static canvas blob immediately
-  if (typeof MediaRecorder === 'undefined' || typeof canvas.captureStream !== 'function') {
-    drawSceneVisual(1.0);
-    return new Promise(resolve => {
-      canvas.toBlob(blob => {
-        resolve(blob ? URL.createObjectURL(blob) : canvas.toDataURL('image/png'));
-      });
-    });
-  }
-
-  // 2. Synthesize High-Fidelity Cinematic Ambient Audio Track via Web Audio API
-  let audioStreamTrack: MediaStreamTrack | null = null;
-  try {
-    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-    if (AudioContextClass) {
-      const audioCtx = new AudioContextClass();
-      const dest = audioCtx.createMediaStreamDestination();
-
-      // Deep cinematic sub-bass drone
-      const osc = audioCtx.createOscillator();
-      const gainNode = audioCtx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(48, audioCtx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(56, audioCtx.currentTime + clipSeconds);
-      gainNode.gain.setValueAtTime(0.01, audioCtx.currentTime);
-      gainNode.gain.linearRampToValueAtTime(0.12, audioCtx.currentTime + 0.6);
-      gainNode.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + clipSeconds);
-
-      osc.connect(gainNode);
-      gainNode.connect(dest);
-      osc.start();
-      osc.stop(audioCtx.currentTime + clipSeconds + 0.5);
-
-      if (dest.stream.getAudioTracks().length > 0) {
-        audioStreamTrack = dest.stream.getAudioTracks()[0];
-      }
-    }
-  } catch {
-    // Audio track progressive enhancement
-  }
-
-  // Modern 30 FPS smooth rendering with 6.5 Mbps bitrate
-  const fps = 30;
-  const canvasStream = canvas.captureStream(fps);
-  const streamTracks: MediaStreamTrack[] = [...canvasStream.getVideoTracks()];
-  if (audioStreamTrack) {
-    streamTracks.push(audioStreamTrack);
-  }
-  const stream = new MediaStream(streamTracks);
-
-  const mimeType = MediaRecorder.isTypeSupported('video/mp4;codecs=avc1')
-    ? 'video/mp4;codecs=avc1'
-    : MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-    ? 'video/webm;codecs=vp9'
-    : MediaRecorder.isTypeSupported('video/webm')
-    ? 'video/webm'
-    : 'video/mp4';
-
-  let recorder: MediaRecorder;
-  try {
-    recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 6500000 });
-  } catch {
-    recorder = new MediaRecorder(stream);
-  }
-
-  const chunks: Blob[] = [];
-  recorder.ondataavailable = e => {
-    if (e.data && e.data.size > 0) chunks.push(e.data);
-  };
-
-  return new Promise<string>(resolve => {
-    let finished = false;
-    const finish = () => {
-      if (finished) return;
-      finished = true;
-      try {
-        if (chunks.length > 0) {
-          const blob = new Blob(chunks, { type: recorder.mimeType || mimeType });
-          resolve(URL.createObjectURL(blob));
-        } else {
-          drawSceneVisual(1.0);
-          canvas.toBlob(blob => {
-            resolve(blob ? URL.createObjectURL(blob) : canvas.toDataURL('image/png'));
-          });
-        }
-      } catch {
-        resolve(canvas.toDataURL('image/png'));
-      }
-    };
-
-    recorder.onstop = finish;
-    recorder.onerror = finish;
-
-    if (signal?.aborted) {
-      finish();
-      return;
-    }
-
-    const onAbort = () => {
-      clearInterval(interval);
-      try {
-        if (recorder.state === 'recording') recorder.stop();
-      } catch {}
-      finish();
-    };
-    signal?.addEventListener('abort', onAbort);
-
-    try {
-      recorder.start(100);
-    } catch {
-      finish();
-      return;
-    }
-
-    const totalFrames = clipSeconds * fps;
-    let currentFrame = 0;
-
-    const interval = setInterval(() => {
-      if (signal?.aborted) {
-        clearInterval(interval);
-        try {
-          if (recorder.state === 'recording') recorder.stop();
-        } catch {}
-        finish();
-        return;
-      }
-
-      currentFrame++;
-      const progress = Math.min(1.0, currentFrame / totalFrames);
-      drawSceneVisual(progress);
-
-      const videoTrack = canvasStream.getVideoTracks()[0];
-      if (videoTrack && (videoTrack as any).requestFrame) {
-        try {
-          (videoTrack as any).requestFrame();
-        } catch {}
-      }
-
-      if (currentFrame >= totalFrames) {
-        clearInterval(interval);
-        setTimeout(() => {
-          try {
-            if (recorder.state === 'recording') recorder.stop();
-          } catch {
-            finish();
-          }
-        }, 150);
-      }
-    }, 1000 / fps);
-
-    // Watchdog safety timeout (clipSeconds + 2s) so recording always completes cleanly
-    setTimeout(() => {
-      clearInterval(interval);
-      try {
-        if (recorder.state === 'recording') recorder.stop();
-        else finish();
-      } catch {
-        finish();
-      }
-    }, (clipSeconds + 2) * 1000);
-  });
-}
-
 export const apiClient = {
   async splitScript(
     script: string,
@@ -1223,28 +876,64 @@ export const apiClient = {
 
           // Generate real diffusion video clip for client
           let clipUrl = '';
+          const token = getClientHfToken();
+          const space = getClientHfSpace();
           try {
-            const token = getClientHfToken();
-            const space = getClientHfSpace();
             clipUrl = await generateClientHfVideo(
               scene.visual_prompt,
               token,
               space,
               job.aspect_ratio,
-              scene.target_duration_seconds
-            );
-          } catch (hfErr) {
-            console.warn('Real HF ZeroGPU generation error, falling back to keyframe renderer:', hfErr);
-            clipUrl = await generateClientVideoClip(
-              scene.visual_prompt,
               scene.target_duration_seconds,
-              scene.resolution,
-              job.aspect_ratio,
-              scene.scene_index,
-              scene.narration_text,
               scene.image_url || undefined,
-              abortController.signal
+              (status) => {
+                scene.generation_progress = {
+                  stage: scene.generation_progress?.stage || 'wan_diffusing',
+                  stage_text: status,
+                  percent: Math.min(95, (scene.generation_progress?.percent || 50) + 8),
+                  logs: [...(scene.generation_progress?.logs || []), `[${new Date().toLocaleTimeString()}] ${status}`],
+                };
+                saveStoredJobs(jobs);
+                this.notifyUpdate(job.id);
+              }
             );
+
+            scene.status = 'done';
+            scene.output_path = clipUrl;
+            scene.last_error = null;
+            scene.generation_progress = {
+              stage: 'complete',
+              stage_text: 'ZeroGPU Video Diffusion Complete (24 FPS • 720p HD)',
+              percent: 100,
+              token_used: token ? 'Authenticated HF Token' : 'Public ZeroGPU Queue',
+              model_name: space,
+              image_submitted_url: scene.image_url || condImgUrl,
+              logs: [
+                ...(scene.generation_progress?.logs || []),
+                `[${new Date().toLocaleTimeString()}] [Complete] Real AI diffusion MP4 video stream ready.`,
+              ],
+            };
+            saveStoredJobs(jobs);
+            this.notifyUpdate(job.id);
+          } catch (hfErr: any) {
+            console.error('Real HF ZeroGPU generation error:', hfErr);
+            scene.status = 'failed';
+            scene.last_error = `ZeroGPU generation failed: ${hfErr.message || 'Hugging Face Space error'}. Please check HF Space status or retry.`;
+            scene.generation_progress = {
+              stage: 'error',
+              stage_text: `Failed: ${hfErr.message || 'Generation error'}`,
+              percent: 100,
+              token_used: token ? 'Authenticated HF Token' : 'Public ZeroGPU Queue',
+              model_name: space,
+              image_submitted_url: scene.image_url || condImgUrl,
+              logs: [
+                ...(scene.generation_progress?.logs || []),
+                `[${new Date().toLocaleTimeString()}] [Error] ${hfErr.message || 'Generation error'}`,
+              ],
+            };
+            saveStoredJobs(jobs);
+            this.notifyUpdate(job.id);
+            continue;
           }
 
           if (cancelledQueueJobIds.has(job.id) || abortController.signal.aborted) {
@@ -1516,36 +1205,67 @@ export const apiClient = {
       saveStoredJobs(jobs);
       this.notifyUpdate(jobId);
 
-      // 2. Generate video clip
+      // 2. Generate real diffusion video clip
       let clipUrl = '';
+      const token = getClientHfToken();
+      const space = getClientHfSpace();
       try {
-        const token = getClientHfToken();
-        const space = getClientHfSpace();
         clipUrl = await generateClientHfVideo(
           scene.visual_prompt,
           token,
           space,
           job.aspect_ratio,
-          scene.target_duration_seconds
-        );
-      } catch (hfErr) {
-        console.warn('Real HF ZeroGPU generation error, falling back to keyframe renderer:', hfErr);
-        clipUrl = await generateClientVideoClip(
-          scene.visual_prompt,
           scene.target_duration_seconds,
-          scene.resolution,
-          job.aspect_ratio,
-          scene.scene_index,
-          scene.narration_text,
           scene.image_url || undefined,
-          abortController.signal
+          (status) => {
+            scene.generation_progress = {
+              stage: scene.generation_progress?.stage || 'wan_diffusing',
+              stage_text: status,
+              percent: Math.min(95, (scene.generation_progress?.percent || 50) + 8),
+              logs: [...(scene.generation_progress?.logs || []), `[${new Date().toLocaleTimeString()}] ${status}`],
+            };
+            saveStoredJobs(jobs);
+            this.notifyUpdate(jobId);
+          }
         );
+
+        scene.status = 'done';
+        scene.output_path = clipUrl;
+        scene.last_error = null;
+        scene.generation_progress = {
+          stage: 'complete',
+          stage_text: 'ZeroGPU Video Diffusion Complete (24 FPS • 720p HD)',
+          percent: 100,
+          token_used: token ? 'Authenticated HF Token' : 'Public ZeroGPU Queue',
+          model_name: space,
+          image_submitted_url: scene.image_url || condImgUrl,
+          logs: [
+            ...(scene.generation_progress?.logs || []),
+            `[${new Date().toLocaleTimeString()}] [Complete] Real AI diffusion MP4 video stream ready.`,
+          ],
+        };
+      } catch (hfErr: any) {
+        console.error('Real HF ZeroGPU generation error in single scene:', hfErr);
+        scene.status = 'failed';
+        scene.last_error = `ZeroGPU generation failed: ${hfErr.message || 'Hugging Face Space error'}. Please check HF Space status or retry.`;
+        scene.generation_progress = {
+          stage: 'error',
+          stage_text: `Failed: ${hfErr.message || 'Generation error'}`,
+          percent: 100,
+          token_used: token ? 'Authenticated HF Token' : 'Public ZeroGPU Queue',
+          model_name: space,
+          image_submitted_url: scene.image_url || condImgUrl,
+          logs: [
+            ...(scene.generation_progress?.logs || []),
+            `[${new Date().toLocaleTimeString()}] [Error] ${hfErr.message || 'Generation error'}`,
+          ],
+        };
       }
 
       if (cancelledQueueJobIds.has(jobId) || abortController.signal.aborted) {
         scene.status = 'pending';
         scene.last_error = 'Stopped by user.';
-      } else {
+      } else if (scene.status === 'done') {
         // 3. Mark complete & Stage 4
         scene.status = 'done';
         scene.output_path = clipUrl;
@@ -1800,51 +1520,32 @@ export const apiClient = {
     const clientToken = getClientHfToken();
     const clientSpace = getClientHfSpace();
 
-    // If client token is configured, connect to Hugging Face ZeroGPU Space directly!
-    if (clientToken) {
-      try {
-        params.onProgress?.(`Connecting browser to Hugging Face Space: ${clientSpace}...`);
-        const videoUrl = await generateClientHfVideo(
-          params.prompt,
-          clientToken,
-          clientSpace,
-          ratio,
-          params.duration || 4,
-          params.onProgress
-        );
+    params.onProgress?.(`Connecting browser to Hugging Face ZeroGPU Space: ${clientSpace}...`);
+    try {
+      const videoUrl = await generateClientHfVideo(
+        params.prompt,
+        clientToken || undefined,
+        clientSpace,
+        ratio,
+        params.duration || 4,
+        params.imageUrl || undefined,
+        params.onProgress
+      );
 
-        return {
-          success: true,
-          videoUrl,
-          filename: `hf_gradio_${Date.now()}.mp4`,
-          engineUsed: 'huggingface_zerogpu',
-          duration: params.duration || 4,
-          aspectRatio: ratio,
-        };
-      } catch (err: any) {
-        console.warn('Browser Hugging Face generation error:', err);
-        params.onProgress?.(`HF Space notice: ${err.message}. Falling back to visual keyframe engine...`);
-      }
+      return {
+        success: true,
+        videoUrl,
+        filename: `hf_gradio_${Date.now()}.mp4`,
+        engineUsed: 'huggingface_zerogpu',
+        duration: params.duration || 4,
+        aspectRatio: ratio,
+      };
+    } catch (err: any) {
+      console.error('Browser Hugging Face ZeroGPU generation error:', err);
+      throw new Error(
+        `AI Video Diffusion failed on Hugging Face ZeroGPU: ${err.message || 'Generation error'}. Please check your connection or provide a Hugging Face token in Settings.`
+      );
     }
-
-    // Accelerated client motion synthesis fallback
-    params.onProgress?.('Rendering 24 FPS motion clip in browser...');
-    const clipUrl = await generateClientVideoClip(
-      params.prompt,
-      params.duration || 5.0,
-      params.resolution || '720p',
-      ratio,
-      0
-    );
-
-    return {
-      success: true,
-      videoUrl: clipUrl,
-      filename: `client_${Date.now()}.mp4`,
-      engineUsed: 'client_motion_engine',
-      duration: params.duration || 5.0,
-      aspectRatio: ratio,
-    };
   },
 };
 

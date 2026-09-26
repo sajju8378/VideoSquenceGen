@@ -3,7 +3,7 @@ export type JobStatus = 'draft' | 'queued' | 'processing' | 'paused' | 'complete
 export type VideoGenerationMode = 'prompt' | 'image_upload' | 'inbuilt_image';
 
 export interface SceneGenerationProgress {
-  stage: 'token_check' | 'image_submitted' | 'wan_diffusing' | 'encoding_mp4' | 'complete';
+  stage: 'token_check' | 'image_submitted' | 'wan_diffusing' | 'encoding_mp4' | 'complete' | 'error';
   stage_text: string;
   percent: number;
   token_used?: string;
